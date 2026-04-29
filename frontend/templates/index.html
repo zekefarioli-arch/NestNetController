@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NestNetController 🏠</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        success: '#10b981',
+                        danger: '#ef4444',
+                        warning: '#f59e0b',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Login Modal -->
+    <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">🏠 NestNetController</h2>
+            <form id="loginForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                    <input type="text" id="username" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                    <input type="password" id="password" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent" required>
+                </div>
+                <div id="loginError" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm"></div>
+                <button type="submit" class="w-full bg-primary text-white py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors">
+                    Login
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App (hidden until logged in) -->
+    <div id="mainApp" class="hidden">
+        <!-- Header -->
+        <header class="bg-white shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <div class="flex justify-between items-center">
+                    <h1 class="text-2xl font-bold text-gray-900">🏠 NestNetController</h1>
+                    <div class="flex items-center space-x-4">
+                        <span id="dryRunBadge" class="hidden px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
+                            🧪 DRY-RUN MODE
+                        </span>
+                        <span id="username Display" class="text-sm text-gray-600"></span>
+                        <button onclick="logout()" class="text-sm text-red-600 hover:text-red-700">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Quick Actions -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">Quick Actions</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <button onclick="quickAction('only_essential_security')" class="bg-orange-500 hover:bg-orange-600 text-white py-3 px-4 rounded-lg transition-colors">
+                        🚨 Only Essential + Security
+                    </button>
+                    <button onclick="quickAction('only_essential')" class="bg-yellow-500 hover:bg-yellow-600 text-white py-3 px-4 rounded-lg transition-colors">
+                        ⚡ Only Essential
+                    </button>
+                    <button onclick="quickAction('enable_all')" class="bg-green-500 hover:bg-green-600 text-white py-3 px-4 rounded-lg transition-colors">
+                        ✅ Enable All
+                    </button>
+                    <button onclick="reloadConfig()" class="bg-blue-500 hover:bg-blue-600 text-white py-3 px-4 rounded-lg transition-colors">
+                        🔄 Reload Config
+                    </button>
+                </div>
+            </div>
+
+            <!-- Device Groups -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">Device Groups</h2>
+                <div id="groupsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Groups will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div>
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">Activity Log</h2>
+                <div class="bg-white rounded-lg shadow overflow-hidden">
+                    <div id="logsContainer" class="divide-y divide-gray-200 max-h-96 overflow-y-auto">
+                        <!-- Logs will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
