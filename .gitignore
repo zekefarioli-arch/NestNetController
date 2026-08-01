@@ -35,3 +35,4 @@ Thumbs.db
 
 # Local config overrides
 config/devices.local.yaml
+config/devices.yaml
