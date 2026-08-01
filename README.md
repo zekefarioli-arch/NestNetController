@@ -19,6 +19,7 @@
 - 📊 **Activity Logs** - Track who blocked/unblocked what and when
 - 🐳 **Docker Ready** - Simple deployment with docker-compose
 - 🔐 **Protected Groups** - Infrastructure devices (routers, switches) are never blocked
+- 🛡️ **Guaranteed Panel Access** - The control panel stays reachable from your LAN (and via WireGuard) no matter what gets blocked
 
 ---
 
@@ -70,6 +71,7 @@ graph TB
 3. Web UI provides simple control interface
 4. Device groups defined by MAC address in YAML config
 5. Firewall blocks/unblocks based on group status
+6. A separate host-level failsafe rule guarantees the control panel itself is always reachable, independent of any group/device blocking (see [Guaranteed Panel Access](#-guaranteed-panel-access-failsafe) below)
 
 ---
 
@@ -105,6 +107,8 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=ChangeThisPassword123
 JWT_SECRET=generate-a-long-random-secret-here
 ```
+
+> ⚠️ **Double-check `WAN_INTERFACE` against reality**, not just `ip addr show`. On multi-NIC gateways it's easy to have a stale or unused interface (e.g. a disabled `eth1`) while the actual LAN traffic flows over a different one (e.g. `enp7s0f0`). Confirm with `ip -brief link show` and `iptables -L FORWARD -v -n` (see [Network Interfaces](#network-interfaces)) before trusting the `.env` defaults — `firewall.py` only reads `WAN_INTERFACE` for blocking, so getting that one right matters most.
 
 3. **Configure devices:**
 ```bash
@@ -150,6 +154,12 @@ groups:
         description: "Main WiFi router/AP"
 ```
 
+> ⚠️ **YAML indentation matters here.** Every key under a group (`description`, `protected`, `devices`) must be indented *inside* that group, not aligned with the group name itself. A misindented `infrastructure:` or `kids:` block silently breaks that group — it either loads as `null` or gets hoisted to the wrong level in `groups`. After editing, always verify with:
+> ```bash
+> docker exec nestnet-api python3 -c "from app.services.device_service import device_service; print(device_service.load_groups())"
+> ```
+> and confirm each group (especially `infrastructure`) shows the devices and `protected` value you expect.
+
 **Finding MAC addresses:**
 ```bash
 # On the gateway, see all connected devices:
@@ -169,6 +179,50 @@ docker compose up -d
 Open in your browser: `http://YOUR_GATEWAY_IP:3002`
 
 Default login: `admin` / `ChangeThisPassword123`
+
+> 🛡️ This URL is designed to stay reachable even if a Quick Action blocks every device group, thanks to the host-level failsafe rule below — but only once you've set it up. New installs should configure it before going to production (step below).
+
+---
+
+## 🛡️ Guaranteed Panel Access (Failsafe)
+
+The whole point of this tool is to be able to cut a device's internet access — which means the one thing that must **never** get cut by accident is your own access to the panel that controls it. This is handled at two levels:
+
+### Level 1: App-level design (already built in)
+
+`firewall.py` only ever writes rules to the `FORWARD` chain, scoped to `-o $WAN_INTERFACE` (i.e. "traffic leaving towards the internet"). It never touches `INPUT`. This means device blocking only affects a device's *outbound internet access* — it was never capable of blocking access to the gateway's own local services (like the panel) in the first place. No configuration needed for this part.
+
+### Level 2: Host-level failsafe rule (recommended, one-time setup)
+
+Depending on how your reverse proxy/UI container is networked, panel traffic can also pass through Docker's own `FORWARD`-adjacent chains (`DOCKER`, `DOCKER-USER`) rather than plain `INPUT` — for example when the UI container is port-mapped instead of using `network_mode: host`. To guarantee access regardless of network topology changes (new switches, new NICs, VPN interfaces), add one rule directly on the **host**, in Docker's `DOCKER-USER` chain — the only chain Docker guarantees it will never rewrite automatically:
+
+```bash
+sudo iptables -I DOCKER-USER 1 ! -i $WAN_INTERFACE -p tcp --dport 3002 -j ACCEPT
+```
+
+Replace `$WAN_INTERFACE` with your actual WAN interface (e.g. `ppp0`). This rule reads: *"any traffic to the panel port that does NOT come from the WAN, gets accepted"* — regardless of which LAN interface, switch, or bridge it arrives on. That includes:
+- Any current or future LAN interface/switch
+- Docker bridge networks
+- A WireGuard tunnel (`wg0` or a WireGuard container's bridge) when connecting remotely — no need to name it explicitly, since it's simply "not the WAN"
+
+**Make it persistent** so it survives a gateway reboot:
+```bash
+sudo apt install iptables-persistent   # if not already installed
+sudo netfilter-persistent save
+```
+
+**Verify it's active and first in line:**
+```bash
+sudo iptables -L DOCKER-USER -v -n --line-numbers
+```
+
+**Test from another device on the LAN:**
+```bash
+curl -I http://YOUR_GATEWAY_IP:3002
+# Expect: HTTP/1.1 200 OK
+```
+
+This rule is intentionally set up **outside of Docker and outside this repo** (directly on the host, saved via `netfilter-persistent`) so it keeps working even if Docker itself fails to start, the compose stack breaks, or a future bug gets introduced in `firewall.py`. Authentication (username/password + JWT) remains the only real gate on *who* can act once they reach the panel — this rule only guarantees *reachability*.
 
 ---
 
@@ -220,22 +274,25 @@ You should see:
 
 When ready to use for real:
 
-1. **Set dry-run to false:**
+1. **Set up the panel-access failsafe first** (see [Guaranteed Panel Access](#-guaranteed-panel-access-failsafe)) — do this *before* flipping dry-run off, so you're never testing real blocking without a safety net already in place.
+
+2. **Set dry-run to false:**
 ```bash
 nano .env
 # Change: DRY_RUN=false
 ```
 
-2. **Restart containers:**
+3. **Restart containers:**
 ```bash
 docker compose down
 docker compose up -d
 ```
 
-3. **Test carefully:**
+4. **Test carefully:**
    - Start with a non-critical device
    - Block it and verify connectivity is cut
    - Unblock and verify connectivity restores
+   - From another device (and, if possible, over WireGuard from outside), confirm the panel itself is still reachable
    - Check logs for any errors
 
 ---
@@ -250,10 +307,18 @@ ip addr show
 ip route | grep default
 ```
 
+**Confirm which interface is actually carrying traffic** (don't rely on `.env` defaults alone):
+```bash
+ip -brief link show
+sudo iptables -L FORWARD -v -n --line-numbers
+```
+Look for the interface with non-zero packet counters in `FORWARD` — that's your real LAN interface, even if a different one is configured or wired up.
+
 Common setups:
 - **Router/Gateway:** WAN=`eth0`, LAN=`eth1`
 - **PPPoE Connection:** WAN=`ppp0`, LAN=`eth0`
 - **USB Network:** May show as `enx...` or similar
+- **Multi-NIC gateway:** may have unused/disabled interfaces present (`DOWN` in `ip -brief link show`) alongside the active one — always verify with the commands above rather than assuming
 
 ### Device Groups
 
@@ -266,6 +331,21 @@ Groups are defined in `config/devices.yaml`. Each group has:
 **Special Groups:**
 - **infrastructure** - Network equipment, always protected
 - **kids** - Auto-populated with unknown devices (future feature)
+
+> ⚠️ Both special groups are easy to misconfigure via YAML indentation — see the warning under [Installation, step 3](#installation) and always confirm with `device_service.load_groups()` after editing.
+
+### Panel Access vs. Device Protection — two different things
+
+It's worth being explicit about this, since they're easy to conflate:
+
+| | **Protected devices** (`infrastructure` group) | **Panel access failsafe** (`DOCKER-USER` rule) |
+|---|---|---|
+| Purpose | Stops your router/AP/switches from losing **their own** internet access | Guarantees **any** device can always reach the control panel |
+| Scope | Only devices explicitly listed by MAC | Universal — no device list needed |
+| Where it lives | `config/devices.yaml` | Host iptables (`DOCKER-USER` chain), outside the app |
+| What breaks it | Wrong/missing MAC in the list | N/A — doesn't depend on device identity at all |
+
+You do **not** need to list every device that should be able to reach the panel. The failsafe rule works by excluding only the WAN interface, so it covers every LAN device, every future switch/NIC, and WireGuard connections automatically.
 
 ### Security Settings
 
@@ -375,9 +455,16 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8004"]
 
 ### Can't access UI
 
+**Check the host-level failsafe rule is present and first in `DOCKER-USER`:**
+```bash
+sudo iptables -L DOCKER-USER -v -n --line-numbers
+```
+If it's missing, see [Guaranteed Panel Access](#-guaranteed-panel-access-failsafe) to add it back.
+
 **Check firewall rules allow port 3002:**
 ```bash
 sudo iptables -L INPUT -v -n | grep 3002
+sudo iptables -L FORWARD -v -n | grep 3002
 ```
 
 **Access from gateway itself:**
@@ -400,6 +487,8 @@ sudo iptables -L FORWARD -v -n
 
 ### Locked yourself out
 
+If you've set up the [panel-access failsafe](#-guaranteed-panel-access-failsafe), this shouldn't happen — the panel stays reachable regardless of device/group blocking. If you still can't reach it:
+
 **SSH into gateway and reset:**
 ```bash
 docker compose down
@@ -413,6 +502,8 @@ cd ~/projects/NestNetController
 docker compose down
 ```
 
+**If even that fails**, the `DOCKER-USER` failsafe rule (being independent of the compose stack and of `FORWARD`) should still let you reach the panel to diagnose from there — this is exactly the scenario it's designed for.
+
 ---
 
 ## 🗺️ Roadmap
@@ -425,11 +516,13 @@ docker compose down
 - [x] Activity logging
 - [x] Dry-run testing mode
 - [x] Docker containerization
+- [x] Guaranteed, device-list-independent panel access (host-level failsafe)
 
 ### 🚧 In Progress
 - [ ] Fix config volume mounting issue
 - [ ] Add dry-run mode badge to UI
 - [ ] Improve error handling and user feedback
+- [ ] Automate failsafe rule setup (install script instead of manual `iptables` command)
 
 ### 📋 Planned Features
 - [ ] Auto-detection of unknown devices (kids group)
@@ -483,7 +576,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 This software is provided "as is" without warranty. Use at your own risk. Always test in dry-run mode before deploying to production. The authors are not responsible for any network disruptions or connectivity issues.
 
-**Security Note:** This tool requires privileged access to modify firewall rules. Ensure proper authentication and keep your admin credentials secure.
+**Security Note:** This tool requires privileged access to modify firewall rules. Ensure proper authentication and keep your admin credentials secure. The panel-access failsafe rule guarantees *reachability*, not *authorization* — login credentials remain the only real access control.
 
 ---
 
