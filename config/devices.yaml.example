@@ -1,0 +1,38 @@
+# Device Groups Configuration
+# Copy this file to devices.yaml and fill in your real MAC addresses
+# devices.yaml is gitignored and never committed
+
+groups:
+  essential:
+    description: "Critical devices that should always have internet"
+    devices:
+      - name: "example_phone"
+        mac: "AA:BB:CC:DD:EE:01"
+        description: "Example phone"
+
+  security:
+    description: "Security cameras and monitoring devices"
+    devices:
+      - name: "example_camera"
+        mac: "AA:BB:CC:DD:EE:02"
+        description: "Example camera"
+
+  media:
+    description: "Entertainment devices"
+    devices:
+      - name: "example_tv"
+        mac: "AA:BB:CC:DD:EE:03"
+        description: "Example smart TV"
+
+  infrastructure:
+    description: "Network infrastructure - NEVER BLOCKED"
+    protected: true
+    devices:
+      - name: "example_gateway"
+        mac: "AA:BB:CC:DD:EE:F1"
+        description: "Gateway LAN interface"
+
+  kids:
+    description: "Unknown or unregistered devices"
+    auto_detect: true
+    devices: []
