@@ -107,7 +107,65 @@ class FirewallService:
             result = self.unblock_device(device, group_name)
             results.append(result)
         return results
-    
+
+    ALLOWLIST_TAG = "nestnet-allow"
+
+    def sync_allowlist(self, all_devices: List[Device]) -> Dict:
+        """
+        Ensure only known devices (from devices.yaml) can reach the WAN.
+        Removes the broad LAN->WAN accept-all rule (one-time migration,
+        safe to call repeatedly), clears any previously-managed allow
+        rules, then re-adds one ACCEPT per known MAC. Block rules
+        (inserted at the top via -I) always take priority over these,
+        since these are appended at the bottom via -A.
+        Idempotent - safe to call on every startup and every reload.
+        """
+        if self.dry_run:
+            logger.info(f"[DRY-RUN] Would sync allowlist for {len(all_devices)} known devices")
+            return {"success": True, "dry_run": True, "devices_count": len(all_devices)}
+
+        # 1. Remove the broad LAN->WAN accept-all rule if still present
+        remove_wide = subprocess.run(
+            ["iptables", "-D", "FORWARD", "-i", self.lan_interface, "-o", self.wan_interface, "-j", "ACCEPT"],
+            capture_output=True, text=True
+        )
+        if remove_wide.returncode == 0:
+            logger.info(f"[EXECUTED] Removed broad accept-all rule ({self.lan_interface} -> {self.wan_interface})")
+
+        # 2. Remove previously-managed allowlist rules (tagged with our comment)
+        while True:
+            check = subprocess.run(
+                ["iptables", "-L", "FORWARD", "-v", "-n", "--line-numbers"],
+                capture_output=True, text=True
+            )
+            managed = [l for l in check.stdout.split("\n") if self.ALLOWLIST_TAG in l]
+            if not managed:
+                break
+            line_num = managed[0].split()[0]
+            subprocess.run(["iptables", "-D", "FORWARD", line_num], capture_output=True, text=True)
+
+        # 3. Add one ACCEPT per known MAC (deduplicated), appended at the end
+        results = []
+        seen_macs = set()
+        for device in all_devices:
+            mac = device.mac.upper()
+            if mac in seen_macs or "PENDIENTE" in mac or "REEMPLAZAR" in mac:
+                continue
+            seen_macs.add(mac)
+            command = [
+                "iptables", "-A", "FORWARD",
+                "-m", "mac", "--mac-source", mac,
+                "-o", self.wan_interface,
+                "-m", "comment", "--comment", self.ALLOWLIST_TAG,
+                "-j", "ACCEPT"
+            ]
+            result = self._execute_command(command, f"ALLOWLIST: {device.name} (mac: {mac})")
+            results.append(result)
+
+        success = all(r.get("success", False) for r in results)
+        logger.info(f"Allowlist sync complete: {len(results)} devices allowed")
+        return {"success": success, "devices_count": len(results), "results": results}
+
     def get_current_rules(self) -> List[str]:
         """Get current iptables rules"""
         if self.dry_run:

@@ -243,7 +243,10 @@ async def get_firewall_rules(current_user: str = Depends(get_current_user)):
 async def reload_config(current_user: str = Depends(get_current_user)):
     """Reload device configuration from disk"""
     groups = device_service.reload_configuration()
-    
+
+    all_devices = device_service.get_all_devices()
+    firewall_service.sync_allowlist(all_devices)
+
     logging_service.log_action(
         user=current_user,
         action="reload_config",

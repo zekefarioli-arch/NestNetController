@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from .routers import auth_router, devices_router, logs_router
 from .config import settings
+from .services import device_service, firewall_service
 
 # Configure logging
 logging.basicConfig(
@@ -31,6 +32,13 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(devices_router)
 app.include_router(logs_router)
+
+@app.on_event("startup")
+async def sync_allowlist_on_startup():
+    """Ensure the firewall allowlist matches devices.yaml every time the app starts"""
+    logger.info("Syncing device allowlist with devices.yaml...")
+    all_devices = device_service.get_all_devices()
+    firewall_service.sync_allowlist(all_devices)
 
 @app.get("/")
 async def root():
