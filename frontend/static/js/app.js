@@ -40,6 +40,7 @@ loginForm.addEventListener('submit', async (e) => {
             authToken = data.access_token;
             localStorage.setItem('authToken', authToken);
             loginError.classList.add('hidden');
+            await updateDryRunBadge();
             showMainApp();
         } else {
             showLoginError('Invalid username or password');
@@ -63,8 +64,22 @@ function showMainApp() {
 function logout() {
     authToken = null;
     localStorage.removeItem('authToken');
+    dryRunBadge.classList.add('hidden');
     loginModal.classList.remove('hidden');
     mainApp.classList.add('hidden');
+}
+
+async function updateDryRunBadge() {
+    try {
+        const response = await apiRequest('/');
+        if (response.ok) {
+            const data = await response.json();
+            dryRunBadge.classList.toggle('hidden', !data.dry_run);
+        }
+    } catch (error) {
+        // Non-fatal: badge just won't show if this fails
+        console.error('Error checking dry-run status:', error);
+    }
 }
 
 async function checkAuth() {
@@ -72,9 +87,7 @@ async function checkAuth() {
         const response = await apiRequest('/');
         if (response.ok) {
             const data = await response.json();
-            if (data.dry_run) {
-                dryRunBadge.classList.remove('hidden');
-            }
+            dryRunBadge.classList.toggle('hidden', !data.dry_run);
             showMainApp();
         } else {
             logout();

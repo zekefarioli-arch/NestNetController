@@ -538,7 +538,7 @@ docker compose down
 
 ### 🚧 In Progress
 - [ ] Fix config volume mounting issue
-- [ ] Add dry-run mode badge to UI
+- [x] Add dry-run mode badge to UI
 - [ ] Improve error handling and user feedback
 - [ ] Automate failsafe rule setup (install script instead of manual `iptables` command)
 
