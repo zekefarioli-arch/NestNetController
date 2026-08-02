@@ -52,9 +52,10 @@ class FirewallService:
                 "error": e.stderr
             }
     
-    def block_device(self, device: Device) -> Dict:
+    def block_device(self, device: Device, group_name: str = None) -> Dict:
         """Block internet access for a specific device by MAC address"""
         mac = device.mac.upper()
+        group_tag = f" from group '{group_name}'" if group_name else ""
         
         # Block FORWARD chain for this MAC
         command = [
@@ -68,12 +69,13 @@ class FirewallService:
         
         return self._execute_command(
             command,
-            f"Blocking device {device.name} ({mac})"
+            f"BLOCK: {device.name}{group_tag} (mac: {mac})"
         )
     
-    def unblock_device(self, device: Device) -> Dict:
+    def unblock_device(self, device: Device, group_name: str = None) -> Dict:
         """Unblock internet access for a specific device by MAC address"""
         mac = device.mac.upper()
+        group_tag = f" from group '{group_name}'" if group_name else ""
         
         # Remove DROP rule for this MAC
         command = [
@@ -87,22 +89,22 @@ class FirewallService:
         
         return self._execute_command(
             command,
-            f"Unblocking device {device.name} ({mac})"
+            f"UNBLOCK: {device.name}{group_tag} (mac: {mac})"
         )
     
-    def block_group(self, devices: List[Device]) -> List[Dict]:
+    def block_group(self, devices: List[Device], group_name: str = None) -> List[Dict]:
         """Block all devices in a group"""
         results = []
         for device in devices:
-            result = self.block_device(device)
+            result = self.block_device(device, group_name)
             results.append(result)
         return results
     
-    def unblock_group(self, devices: List[Device]) -> List[Dict]:
+    def unblock_group(self, devices: List[Device], group_name: str = None) -> List[Dict]:
         """Unblock all devices in a group"""
         results = []
         for device in devices:
-            result = self.unblock_device(device)
+            result = self.unblock_device(device, group_name)
             results.append(result)
         return results
     

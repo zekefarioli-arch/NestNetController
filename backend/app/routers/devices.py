@@ -56,12 +56,12 @@ async def toggle_group(
     
     if is_blocked:
         # Unblock the group
-        results = firewall_service.unblock_group(group.devices)
+        results = firewall_service.unblock_group(group.devices, group_name)
         action = "unblock"
         new_state = "enabled"
     else:
         # Block the group
-        results = firewall_service.block_group(group.devices)
+        results = firewall_service.block_group(group.devices, group_name)
         action = "block"
         new_state = "disabled"
     
@@ -94,7 +94,7 @@ async def enable_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
     
-    results = firewall_service.unblock_group(group.devices)
+    results = firewall_service.unblock_group(group.devices, group_name)
     success = all(r.get('success', False) for r in results)
     
     logging_service.log_action(
@@ -128,7 +128,7 @@ async def disable_group(
             detail="Cannot block protected infrastructure group"
         )
     
-    results = firewall_service.block_group(group.devices)
+    results = firewall_service.block_group(group.devices, group_name)
     success = all(r.get('success', False) for r in results)
     
     logging_service.log_action(
@@ -158,7 +158,7 @@ async def quick_action(
         # Enable all non-protected groups
         for group in groups:
             if not group.protected and not group.auto_detect:
-                group_results = firewall_service.unblock_group(group.devices)
+                group_results = firewall_service.unblock_group(group.devices, group.name)
                 results.extend(group_results)
         
         logging_service.log_action(
@@ -174,13 +174,13 @@ async def quick_action(
             if group.name == "essential" or group.protected:
                 continue
             if not group.auto_detect:
-                group_results = firewall_service.block_group(group.devices)
+                group_results = firewall_service.block_group(group.devices, group.name)
                 results.extend(group_results)
         
         # Ensure essential is unblocked
         essential = device_service.get_group("essential")
         if essential:
-            essential_results = firewall_service.unblock_group(essential.devices)
+            essential_results = firewall_service.unblock_group(essential.devices, "essential")
             results.extend(essential_results)
         
         logging_service.log_action(
@@ -196,14 +196,14 @@ async def quick_action(
             if group.name in ["essential", "security"] or group.protected:
                 continue
             if not group.auto_detect:
-                group_results = firewall_service.block_group(group.devices)
+                group_results = firewall_service.block_group(group.devices, group.name)
                 results.extend(group_results)
         
         # Ensure essential and security are unblocked
         for group_name in ["essential", "security"]:
             group = device_service.get_group(group_name)
             if group:
-                group_results = firewall_service.unblock_group(group.devices)
+                group_results = firewall_service.unblock_group(group.devices, group_name)
                 results.extend(group_results)
         
         logging_service.log_action(
