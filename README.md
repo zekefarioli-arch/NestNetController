@@ -70,8 +70,9 @@ graph TB
 2. FastAPI backend manages iptables firewall rules
 3. Web UI provides simple control interface
 4. Device groups defined by MAC address in YAML config
-5. Firewall blocks/unblocks based on group status
-6. A separate host-level failsafe rule guarantees the control panel itself is always reachable, independent of any group/device blocking (see [Guaranteed Panel Access](#-guaranteed-panel-access-failsafe) below)
+5. **Default-deny model:** only devices listed in `devices.yaml` can reach the internet at all. On every app startup (and every "Reload Config"), the backend syncs an ACCEPT rule per known MAC and relies on the `FORWARD` chain's default DROP policy to block everything else — including unregistered/unknown devices, with no separate action needed
+6. Group blocking/unblocking (Quick Actions, toggles) adds/removes temporary DROP rules on top of the allowlist, taking priority over it
+7. A separate host-level failsafe rule guarantees the control panel itself is always reachable, independent of any group/device blocking or the allowlist sync (see [Guaranteed Panel Access](#-guaranteed-panel-access-failsafe) below)
 
 ---
 
@@ -320,6 +321,22 @@ Common setups:
 - **USB Network:** May show as `enx...` or similar
 - **Multi-NIC gateway:** may have unused/disabled interfaces present (`DOWN` in `ip -brief link show`) alongside the active one — always verify with the commands above rather than assuming
 
+### Default-Deny Model (Allowlist)
+
+**Only devices listed anywhere in `devices.yaml` can reach the internet.** This is enforced automatically:
+
+- On every backend startup, and every time "Reload Config" is triggered, `sync_allowlist()` removes the broad LAN→WAN accept rule and replaces it with one `ACCEPT` rule per known MAC address (tagged with a `nestnet-allow` comment so re-syncs don't duplicate rules)
+- Any device **not** present in `devices.yaml` — a visitor's phone, an unregistered IoT gadget, anything new — is blocked by the `FORWARD` chain's default `DROP` policy, with no extra configuration needed
+- Group blocking (Quick Actions, individual toggles) still works exactly as before — those add temporary `DROP` rules that take priority over the allowlist
+
+**Practical implication:** if you add a new device to your network, it has **no internet access until you add its MAC to `devices.yaml`** and reload the config (or restart the container). This is the entire point of the model — but it does mean guests, new IoT purchases, etc. need a deliberate step before they'll work.
+
+```bash
+# After adding a device to devices.yaml:
+curl -X POST -u admin:yourpassword http://localhost:8003/devices/reload
+# or just click "Reload Config" in the web UI
+```
+
 ### Device Groups
 
 Groups are defined in `config/devices.yaml`. Each group has:
@@ -517,6 +534,7 @@ docker compose down
 - [x] Dry-run testing mode
 - [x] Docker containerization
 - [x] Guaranteed, device-list-independent panel access (host-level failsafe)
+- [x] Default-deny firewall model — only devices in devices.yaml get internet access
 
 ### 🚧 In Progress
 - [ ] Fix config volume mounting issue
@@ -576,7 +594,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 This software is provided "as is" without warranty. Use at your own risk. Always test in dry-run mode before deploying to production. The authors are not responsible for any network disruptions or connectivity issues.
 
-**Security Note:** This tool requires privileged access to modify firewall rules. Ensure proper authentication and keep your admin credentials secure. The panel-access failsafe rule guarantees *reachability*, not *authorization* — login credentials remain the only real access control.
+**Security Note:** This tool requires privileged access to modify firewall rules. Ensure proper authentication and keep your admin credentials secure. The panel-access failsafe rule guarantees *reachability*, not *authorization* — login credentials remain the only real access control. With the default-deny allowlist model active, an incomplete `devices.yaml` (missing MACs) will cut internet access for those devices — always verify new/changed hardware is added before relying on it.
 
 ---
 
