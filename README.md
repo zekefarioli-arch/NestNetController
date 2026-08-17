@@ -337,6 +337,36 @@ curl -X POST -u admin:yourpassword http://localhost:8003/devices/reload
 # or just click "Reload Config" in the web UI
 ```
 
+### ⚠️ MAC Address Reliability — Not All Devices Behave the Same
+
+This system identifies devices by MAC address, which works reliably for **fixed-function / "dumb" devices** but is fragile for modern smartphones due to **MAC randomization**.
+
+**Confirmed reliable (static MAC, safe to manage by group):**
+- Security cameras (Blink, Ring)
+- Amazon Echo devices (Show, Dot)
+- Desktops/laptops (wired and WiFi)
+- Network infrastructure (routers, access points) — always `protected: true`, never touched anyway
+
+**Unconfirmed / needs testing:**
+- Smart TVs (LG, Google TV) — some smart TVs also randomize MAC on WiFi; wired connections are safe, WiFi is unverified on this network
+
+**Known unreliable — Android phones:**
+Modern Android versions use a **randomized MAC address per WiFi network** by default, and periodically rotate it even on the same network. The setting to disable this ("Use device MAC" instead of "Use randomized MAC") exists per-network in Android's WiFi settings, but:
+- It's buried a few taps deep and easy to lose track of
+- Some Android versions/OEM skins reset it after updates
+- A phone that "worked" with a pinned MAC can silently start rotating again without any visible warning
+
+**Practical consequence:** if you rely on group-blocking a phone by MAC (e.g. "Only Essential" at bedtime) and Android quietly rotates its MAC, that phone effectively becomes an unregistered device — it won't match any `nestnet-allow` rule and will lose internet entirely, appearing indistinguishable from a hardware/config problem.
+
+**Current workaround: always keep a WireGuard connection available.** This isn't just for being away from home — it also recovers you when you're on your own WiFi and got cut off:
+
+- **Why LAN access alone doesn't save you:** the MAC allowlist only gates outbound *internet* access (the `FORWARD` chain, matched against `nestnet-allow` rules). It never gates LAN access — any device on your home WiFi can always reach the panel locally. The problem is that once a phone's MAC gets blocked, that phone has **no internet at all, WiFi included** — so even though the panel is technically reachable on the LAN, the phone itself can't get there because it has no connectivity to route through.
+- **Why WireGuard fixes it:** WireGuard isn't "a device on the LAN asking to go out" — it's a tunnel that places you *inside* the LAN, authenticated by the tunnel's own key rather than by MAC address. It never touches the `FORWARD`/allowlist check at all.
+- **At home, WiFi cut off by a MAC block:** switch that phone to mobile data, connect via WireGuard, and you're back inside the LAN with a working connection to the panel — from there you can re-enable the group or add the new MAC.
+- **Away from home:** same thing — WireGuard over mobile data gets you in regardless of any group block currently active.
+
+See [Guaranteed Panel Access](#-guaranteed-panel-access-failsafe) for the failsafe rule that keeps the panel itself always reachable via WireGuard — this section explains why you specifically need WireGuard (not just "any LAN device") to make use of that reachability once a phone loses its own connectivity.
+
 ### Device Groups
 
 Groups are defined in `config/devices.yaml`. Each group has:
