@@ -1,5 +1,9 @@
 import yaml
 import logging
+import os
+import re
+import shutil
+from datetime import datetime
 from typing import List, Dict, Optional
 from ..config import settings
 from ..models import Device, DeviceGroup
@@ -96,5 +100,166 @@ class DeviceService:
         """Force reload of configuration from disk"""
         self._groups_cache = None
         return self.load_groups(force_reload=True)
+
+    # --- Mutation support: backup, validate, atomic write, rotate ---
+
+    MAC_PATTERN = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+
+    def _backup_dir(self) -> str:
+        backup_dir = os.path.join(os.path.dirname(self.config_path), ".backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        return backup_dir
+
+    def _backup_current_file(self) -> None:
+        """Copy the current devices.yaml to .backups/ with a timestamp, if it exists."""
+        if not os.path.exists(self.config_path):
+            return
+        backup_dir = self._backup_dir()
+        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
+        backup_path = os.path.join(backup_dir, f"devices.yaml.{timestamp}")
+        shutil.copy2(self.config_path, backup_path)
+        logger.info(f"Backed up devices.yaml to {backup_path}")
+
+    def _rotate_backups(self, keep: int = 10) -> None:
+        backup_dir = self._backup_dir()
+        backups = sorted(f for f in os.listdir(backup_dir) if f.startswith("devices.yaml."))
+        excess = len(backups) - keep
+        for old_backup in backups[:max(excess, 0)]:
+            os.remove(os.path.join(backup_dir, old_backup))
+
+    def _groups_to_yaml_dict(self, groups: List[DeviceGroup]) -> dict:
+        """Convert in-memory groups back to the devices.yaml structure."""
+        result = {"groups": {}}
+        for group in groups:
+            if group.auto_detect:
+                result["kids"] = {"description": group.description or "Unknown or unregistered devices"}
+                continue
+            result["groups"][group.name] = {
+                "description": group.description or "",
+                "protected": group.protected,
+                "devices": [
+                    {"name": d.name, "mac": d.mac, "description": d.description}
+                    for d in group.devices
+                ],
+            }
+        return result
+
+    def save_groups(self, groups: List[DeviceGroup]) -> None:
+        """
+        Backs up the current file, validates the new content against the real
+        Pydantic models, then writes atomically. Never leaves devices.yaml in
+        a partial or invalid state.
+        """
+        self._backup_current_file()
+
+        yaml_content = self._groups_to_yaml_dict(groups)
+
+        # Validate by re-parsing exactly as load_groups() would
+        try:
+            yaml_str = yaml.safe_dump(yaml_content, sort_keys=False)
+            reparsed = yaml.safe_load(yaml_str)
+            for group_name, group_data in reparsed.get("groups", {}).items():
+                for device_data in group_data.get("devices", []):
+                    Device(**device_data)
+        except Exception as e:
+            raise ValueError(f"Validation failed, nothing was written: {e}")
+
+        tmp_path = f"{self.config_path}.tmp"
+        with open(tmp_path, "w") as f:
+            f.write(yaml_str)
+        os.replace(tmp_path, self.config_path)
+
+        self._rotate_backups(keep=10)
+        self._groups_cache = None
+        logger.info("devices.yaml updated and validated successfully")
+
+    def add_group(self, name: str, description: Optional[str], auto_detect: bool) -> DeviceGroup:
+        groups = self.load_groups()
+        if any(g.name.lower() == name.lower() for g in groups):
+            raise ValueError(f"Group '{name}' already exists")
+        if name.lower() == "kids":
+            raise ValueError("'kids' is a reserved group name")
+
+        new_group = DeviceGroup(
+            name=name,
+            description=description or "",
+            devices=[],
+            protected=False,  # UI can never create protected groups
+            auto_detect=auto_detect,
+            enabled=True,
+        )
+        groups.append(new_group)
+        self.save_groups(groups)
+        return new_group
+
+    def delete_group(self, name: str) -> None:
+        groups = self.load_groups()
+        target = next((g for g in groups if g.name == name), None)
+        if target is None:
+            raise LookupError(f"Group '{name}' not found")
+        if target.protected:
+            raise PermissionError(f"Cannot delete protected group '{name}'")
+        if target.devices:
+            raise ValueError(f"Group '{name}' still has {len(target.devices)} device(s); remove them first")
+
+        remaining = [g for g in groups if g.name != name]
+        self.save_groups(remaining)
+
+    def add_device(self, group_name: str, device: Device) -> Device:
+        mac = device.mac.upper()
+        if not self.MAC_PATTERN.match(mac):
+            raise ValueError(f"Invalid MAC address format: {device.mac}")
+
+        groups = self.load_groups()
+        target = next((g for g in groups if g.name == group_name), None)
+        if target is None:
+            raise LookupError(f"Group '{group_name}' not found")
+        if target.auto_detect:
+            raise ValueError("Cannot manually add devices to an auto-detect group")
+
+        for g in groups:
+            if any(d.mac.upper() == mac for d in g.devices):
+                raise ValueError(f"MAC {mac} is already assigned to group '{g.name}'")
+
+        device.mac = mac
+        target.devices.append(device)
+        self.save_groups(groups)
+        return device
+
+    def delete_device(self, group_name: str, mac: str) -> None:
+        mac = mac.upper()
+        groups = self.load_groups()
+        target = next((g for g in groups if g.name == group_name), None)
+        if target is None:
+            raise LookupError(f"Group '{group_name}' not found")
+
+        before = len(target.devices)
+        target.devices = [d for d in target.devices if d.mac.upper() != mac]
+        if len(target.devices) == before:
+            raise LookupError(f"Device with MAC {mac} not found in group '{group_name}'")
+
+        self.save_groups(groups)
+
+    def restore_latest_backup(self) -> str:
+        """Restore the most recent backup as the active devices.yaml. Returns the backup filename used."""
+        backup_dir = self._backup_dir()
+        backups = sorted(f for f in os.listdir(backup_dir) if f.startswith("devices.yaml."))
+        if not backups:
+            raise LookupError("No backups available to restore")
+
+        latest = backups[-1]
+        backup_path = os.path.join(backup_dir, latest)
+
+        # Back up the current (about-to-be-overwritten) file too, so restore is itself reversible
+        self._backup_current_file()
+
+        tmp_path = f"{self.config_path}.tmp"
+        shutil.copy2(backup_path, tmp_path)
+        os.replace(tmp_path, self.config_path)
+
+        self._groups_cache = None
+        logger.info(f"Restored devices.yaml from backup {latest}")
+        return latest
+
 
 device_service = DeviceService()

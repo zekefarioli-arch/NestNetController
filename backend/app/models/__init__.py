@@ -1,4 +1,14 @@
-from .device import Device, DeviceGroup, GroupStatusUpdate, QuickAction, LoginRequest, Token, ActionLog
+from .device import (
+    Device,
+    DeviceGroup,
+    GroupStatusUpdate,
+    QuickAction,
+    LoginRequest,
+    Token,
+    ActionLog,
+    NewDeviceGroup,
+    NewDevice,
+)
 
 __all__ = [
     "Device",
@@ -8,4 +18,6 @@ __all__ = [
     "LoginRequest",
     "Token",
     "ActionLog",
+    "NewDeviceGroup",
+    "NewDevice",
 ]

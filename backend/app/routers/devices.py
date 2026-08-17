@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List
-from ..models import DeviceGroup, GroupStatusUpdate, QuickAction
+from ..models import DeviceGroup, GroupStatusUpdate, QuickAction, NewDeviceGroup, NewDevice, Device
 from ..services import device_service, firewall_service, logging_service
 from .auth import get_current_user
 
@@ -232,6 +232,119 @@ async def quick_action(
         "results": results,
         "success": all(r.get('success', False) for r in results)
     }
+
+@router.post("/groups", response_model=DeviceGroup, status_code=201)
+async def create_group(
+    payload: NewDeviceGroup,
+    current_user: str = Depends(get_current_user)
+):
+    """Create a new device group"""
+    try:
+        new_group = device_service.add_group(
+            name=payload.name,
+            description=payload.description,
+            auto_detect=payload.auto_detect
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logging_service.log_action(
+        user=current_user, action="create_group", target=payload.name, success=True
+    )
+    return new_group
+
+
+@router.delete("/groups/{group_name}")
+async def delete_group(
+    group_name: str,
+    current_user: str = Depends(get_current_user)
+):
+    """Delete a device group (must be empty and not protected)"""
+    try:
+        device_service.delete_group(group_name)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logging_service.log_action(
+        user=current_user, action="delete_group", target=group_name, success=True
+    )
+    return {"group": group_name, "deleted": True}
+
+
+@router.post("/groups/{group_name}/devices", response_model=Device, status_code=201)
+async def add_device(
+    group_name: str,
+    device: NewDevice,
+    current_user: str = Depends(get_current_user)
+):
+    """Add a device to an existing group"""
+    try:
+        new_device = device_service.add_device(group_name, Device(**device.model_dump()))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    all_devices = device_service.get_all_devices()
+    firewall_service.sync_allowlist(all_devices)
+
+    logging_service.log_action(
+        user=current_user,
+        action="add_device",
+        target=f"{group_name}/{new_device.mac}",
+        success=True,
+        details=new_device.name
+    )
+    return new_device
+
+
+@router.delete("/groups/{group_name}/devices/{mac}")
+async def delete_device(
+    group_name: str,
+    mac: str,
+    current_user: str = Depends(get_current_user)
+):
+    """Remove a device from a group"""
+    try:
+        device_service.delete_device(group_name, mac)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    all_devices = device_service.get_all_devices()
+    firewall_service.sync_allowlist(all_devices)
+
+    logging_service.log_action(
+        user=current_user,
+        action="delete_device",
+        target=f"{group_name}/{mac.upper()}",
+        success=True
+    )
+    return {"group": group_name, "mac": mac.upper(), "deleted": True}
+
+
+@router.post("/restore")
+async def restore_backup(
+    current_user: str = Depends(get_current_user)
+):
+    """Restore devices.yaml from the most recent backup"""
+    try:
+        restored_from = device_service.restore_latest_backup()
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    groups = device_service.reload_configuration()
+    all_devices = device_service.get_all_devices()
+    firewall_service.sync_allowlist(all_devices)
+
+    logging_service.log_action(
+        user=current_user, action="restore_backup", target=restored_from, success=True
+    )
+    return {"restored_from": restored_from, "groups_count": len(groups)}
+
 
 @router.get("/firewall/rules")
 async def get_firewall_rules(current_user: str = Depends(get_current_user)):

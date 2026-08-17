@@ -14,6 +14,16 @@ class DeviceGroup(BaseModel):
     auto_detect: bool = False
     enabled: bool = True
 
+class NewDeviceGroup(BaseModel):
+    name: str
+    description: Optional[str] = None
+    auto_detect: bool = False
+
+class NewDevice(BaseModel):
+    name: str
+    mac: str
+    description: Optional[str] = None
+
 class GroupStatusUpdate(BaseModel):
     group_name: str
     enabled: bool
