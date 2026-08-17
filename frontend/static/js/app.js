@@ -106,7 +106,7 @@ async function apiRequest(endpoint, options = {}) {
         }
     };
     
-    return fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         ...defaultOptions,
         ...options,
         headers: {
@@ -114,6 +114,15 @@ async function apiRequest(endpoint, options = {}) {
             ...options.headers
         }
     });
+
+    // Token vencido o inválido: limpiar sesión y volver al login
+    // en vez de dejar que cada caller maneje el 401 por separado
+    if (response.status === 401) {
+        logout();
+        throw new Error('Session expired, please log in again');
+    }
+
+    return response;
 }
 
 // Dashboard
