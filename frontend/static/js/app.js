@@ -125,6 +125,98 @@ async function apiRequest(endpoint, options = {}) {
     return response;
 }
 
+// Feedback: toasts, busy buttons, haptics
+// The panel is used mostly from a phone, so every action has to say
+// clearly that it was received, that it is running, and how it ended.
+const TOAST_STYLES = {
+    success: { classes: 'bg-green-600', icon: '✓' },
+    error:   { classes: 'bg-red-600',   icon: '✗' },
+    warning: { classes: 'bg-yellow-500', icon: '⚠' },
+    info:    { classes: 'bg-gray-800',  icon: 'ℹ' },
+};
+
+function showToast(message, type = 'info', duration = 3500) {
+    const container = document.getElementById('toastContainer');
+    const style = TOAST_STYLES[type] || TOAST_STYLES.info;
+
+    const toast = document.createElement('div');
+    toast.className = `${style.classes} text-white pointer-events-auto w-full max-w-sm rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 text-sm transition duration-300 opacity-0 translate-y-2`;
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+
+    const icon = document.createElement('span');
+    icon.className = 'font-bold text-base';
+    icon.textContent = style.icon;
+    const text = document.createElement('span');
+    text.className = 'flex-1';
+    text.textContent = message;
+    toast.append(icon, text);
+
+    // Tap to dismiss early
+    const dismiss = () => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+    };
+    toast.addEventListener('click', dismiss);
+
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.remove('opacity-0', 'translate-y-2'));
+
+    // Errors stay longer: they are the ones the user must not miss
+    setTimeout(dismiss, type === 'error' ? duration * 2 : duration);
+
+    vibrate(type === 'error' ? [60, 60, 60] : 30);
+}
+
+function vibrate(pattern) {
+    // Not supported on iOS Safari; harmless no-op there
+    if (navigator.vibrate) navigator.vibrate(pattern);
+}
+
+// Disables the button and shows a spinner while fn runs, so a slow
+// iptables call doesn't look like a missed tap (and can't be double-fired)
+async function withBusy(button, busyLabel, fn) {
+    if (!button) return fn();
+    if (button.disabled) return;
+
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = `
+        <span class="inline-flex items-center justify-center gap-2">
+            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle>
+                <path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path>
+            </svg>
+            ${busyLabel}
+        </span>`;
+    try {
+        return await fn();
+    } finally {
+        // The button may have been replaced by a re-render; restoring a
+        // detached node is harmless
+        button.disabled = false;
+        button.innerHTML = original;
+    }
+}
+
+async function errorDetail(response, fallback) {
+    try {
+        const data = await response.json();
+        return data.detail || fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function formatGroupName(name) {
+    return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+const QUICK_ACTION_LABELS = {
+    only_essential_security: 'Only Essential + Security',
+    only_essential: 'Only Essential',
+    enable_all: 'All groups enabled',
+};
+
 // Dashboard
 async function loadDashboard() {
     await Promise.all([
@@ -193,8 +285,8 @@ function createGroupCard(group) {
             <span class="text-sm font-medium ${statusColor}">${statusText}</span>
             ${!isProtected ? `
                 <button 
-                    onclick="toggleGroup('${group.name}')" 
-                    class="${group.enabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                    onclick="toggleGroup('${group.name}', this)" 
+                    class="${group.enabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white px-4 py-2 rounded-lg text-sm transition active:scale-95 disabled:opacity-60"
                 >
                     ${group.enabled ? 'Block' : 'Enable'}
                 </button>
@@ -207,55 +299,82 @@ function createGroupCard(group) {
     return div;
 }
 
-async function toggleGroup(groupName) {
-    try {
-        const response = await apiRequest(`/devices/groups/${groupName}/toggle`, {
-            method: 'POST'
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            alert(`Error: ${error.detail}`);
-            return;
+async function toggleGroup(groupName, button) {
+    const label = formatGroupName(groupName);
+    await withBusy(button, 'Applying…', async () => {
+        try {
+            const response = await apiRequest(`/devices/groups/${groupName}/toggle`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) {
+                showToast(`${label}: ${await errorDetail(response, 'request failed')}`, 'error');
+                return;
+            }
+            
+            const data = await response.json();
+            const verb = data.action === 'block' ? 'blocked' : 'enabled';
+            // 200 with success=false means some firewall rules failed to apply
+            if (data.success) {
+                showToast(`${label} ${verb}`, 'success');
+            } else {
+                showToast(`${label} ${verb} only partially — some devices failed, check the activity log`, 'warning');
+            }
+            await loadDashboard();
+        } catch (error) {
+            console.error('Error toggling group:', error);
+            showToast(`Couldn't change ${label}: ${error.message}`, 'error');
         }
-        
-        await loadDashboard();
-    } catch (error) {
-        console.error('Error toggling group:', error);
-        alert('Failed to toggle group');
-    }
+    });
 }
 
-async function quickAction(action) {
-    try {
-        const response = await apiRequest('/devices/quick-action', {
-            method: 'POST',
-            body: JSON.stringify({ action })
-        });
-        
-        if (!response.ok) throw new Error('Quick action failed');
-        
-        await loadDashboard();
-    } catch (error) {
-        console.error('Error executing quick action:', error);
-        alert('Failed to execute quick action');
-    }
+async function quickAction(action, button) {
+    const label = QUICK_ACTION_LABELS[action] || formatAction(action);
+    await withBusy(button, 'Applying…', async () => {
+        try {
+            const response = await apiRequest('/devices/quick-action', {
+                method: 'POST',
+                body: JSON.stringify({ action })
+            });
+            
+            if (!response.ok) {
+                showToast(`${label}: ${await errorDetail(response, 'request failed')}`, 'error');
+                return;
+            }
+            
+            const data = await response.json();
+            if (data.success) {
+                showToast(`${label} applied`, 'success');
+            } else {
+                showToast(`${label} applied only partially — check the activity log`, 'warning');
+            }
+            await loadDashboard();
+        } catch (error) {
+            console.error('Error executing quick action:', error);
+            showToast(`Couldn't apply ${label}: ${error.message}`, 'error');
+        }
+    });
 }
 
-async function reloadConfig() {
-    try {
-        const response = await apiRequest('/devices/reload', {
-            method: 'POST'
-        });
-        
-        if (!response.ok) throw new Error('Reload failed');
-        
-        await loadDashboard();
-        alert('Configuration reloaded successfully');
-    } catch (error) {
-        console.error('Error reloading config:', error);
-        alert('Failed to reload configuration');
-    }
+async function reloadConfig(button) {
+    await withBusy(button, 'Reloading…', async () => {
+        try {
+            const response = await apiRequest('/devices/reload', {
+                method: 'POST'
+            });
+            
+            if (!response.ok) {
+                showToast(`Reload failed: ${await errorDetail(response, 'request failed')}`, 'error');
+                return;
+            }
+            
+            await loadDashboard();
+            showToast('Configuration reloaded', 'success');
+        } catch (error) {
+            console.error('Error reloading config:', error);
+            showToast(`Couldn't reload configuration: ${error.message}`, 'error');
+        }
+    });
 }
 
 async function loadLogs() {
