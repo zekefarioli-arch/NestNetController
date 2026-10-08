@@ -48,14 +48,14 @@
         <!-- Header -->
         <header class="bg-white shadow-sm">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                <div class="flex justify-between items-center">
-                    <h1 class="text-2xl font-bold text-gray-900">🏠 NestNetController</h1>
-                    <div class="flex items-center space-x-4">
-                        <span id="dryRunBadge" class="hidden px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
-                            🧪 DRY-RUN MODE
+                <div class="flex justify-between items-center gap-3">
+                    <h1 class="text-xl sm:text-2xl font-bold text-gray-900 truncate min-w-0">🏠 NestNetController</h1>
+                    <div class="flex items-center gap-2 sm:gap-4 shrink-0">
+                        <span id="dryRunBadge" class="hidden px-2 sm:px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap">
+                            🧪 DRY-RUN<span class="hidden sm:inline"> MODE</span>
                         </span>
                         <span id="username Display" class="text-sm text-gray-600"></span>
-                        <button onclick="logout()" class="text-sm text-red-600 hover:text-red-700">Logout</button>
+                        <button onclick="logout()" class="text-sm text-red-600 hover:text-red-700 whitespace-nowrap py-2 -my-2">Logout</button>
                     </div>
                 </div>
             </div>
