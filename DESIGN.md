@@ -29,7 +29,7 @@ All colours are CSS variables on `:root` (light) and `.dark`; components never h
 - Status: `--danger` (#B42318 light, #F97066 dark) only for real errors; `--warning` for the dry-run notice and partial results.
 - Amber means one thing: **internet is on**. It is never decoration.
 - `--border` is for dividers only (about 1.5:1). Anything that needs a visible boundary (levers, inputs, buttons) uses `--muted`, which meets 3:1.
-- Default to the system theme; a manual choice is saved and applied by an inline script in `<head>` so the page never flashes the wrong theme. Both themes must be complete and pass WCAG AA.
+- Light is the default, for everyone, whatever the system theme says. A manual choice is saved on the device and applied by an inline script in `<head>` so the page never flashes the wrong theme. Both themes must be complete and pass WCAG AA.
 
 ## 4. Space, shape, depth
 - 4px base: 4, 8, 12, 16, 24, 32, 48, 64, 96.

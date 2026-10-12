@@ -463,11 +463,23 @@ You do **not** need to list every device that should be able to reach the panel.
 
 ### Security Settings
 
+**Users.** The first user is the admin of `.env` (`ADMIN_USERNAME` and `ADMIN_PASSWORD`, kept in plain text there). More users, and a better password for the admin, live hashed (scrypt) in `config/users.yaml`, managed inside the container. The password is asked for twice and never goes on the command line:
+
+```bash
+docker exec -it nestnet-api python -m app.users set vivi     # add a user or change a password
+docker exec -it nestnet-api python -m app.users set admin    # the admin: from then on the file wins over .env
+docker exec -it nestnet-api python -m app.users list
+docker exec -it nestnet-api python -m app.users remove vivi
+```
+
+Passwords need at least 12 characters. Changing a password or removing a user ends that user's open sessions (the session token carries a fingerprint of the credential); changing `JWT_SECRET` ends everyone's. The activity log names the user who made each change.
+
 **Change default credentials immediately:**
 ```bash
 nano .env
 # Update ADMIN_PASSWORD and JWT_SECRET
 ```
+(or set the admin with `app.users` as above and leave `ADMIN_PASSWORD` as a long random value you do not use.)
 
 **Use strong passwords:**
 - At least 12 characters

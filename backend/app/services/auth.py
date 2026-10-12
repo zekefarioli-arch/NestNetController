@@ -41,8 +41,5 @@ def verify_token(token: str) -> dict:
         )
 
 def authenticate_user(username: str, password: str) -> bool:
-    # Simple authentication against environment variables
-    # In production, this should use a proper user database
-    if username == settings.admin_username and password == settings.admin_password:
-        return True
-    return False
+    from . import users
+    return users.verify_login(username, password)

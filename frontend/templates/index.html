@@ -3,20 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light dark">
     <title>NestNet panel</title>
-    <!-- The saved theme (or the system one) is applied before the first paint: no flash of the wrong theme -->
+    <!-- The saved theme is applied before the first paint (no flash of the wrong theme). Default: light -->
     <script>
         (function () {
             var saved = null;
             try { saved = localStorage.getItem('theme'); } catch (e) {}
-            var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
-            document.documentElement.classList.toggle('dark', dark);
+            document.documentElement.classList.toggle('dark', saved === 'dark');
         })();
     </script>
-    <link rel="stylesheet" href="/static/css/app.css?v=2026-10-12b">
+    <link rel="stylesheet" href="/static/css/app.css?v=2026-10-12c">
     <link rel="preload" href="/static/fonts/barlow-condensed-600.woff2" as="font" type="font/woff2" crossorigin>
-    <script src="/static/js/tailwind.js?v=2026-10-12b"></script>
+    <script src="/static/js/tailwind.js?v=2026-10-12c"></script>
     <script>
         // Colours are the tokens of app.css, so there is one source of truth for both themes
         tailwind.config = {
@@ -157,7 +155,7 @@
          style="padding-bottom: max(1rem, env(safe-area-inset-bottom));">
     </div>
 
-    <script src="/static/js/summary.js?v=2026-10-12b"></script>
-    <script src="/static/js/app.js?v=2026-10-12b"></script>
+    <script src="/static/js/summary.js?v=2026-10-12c"></script>
+    <script src="/static/js/app.js?v=2026-10-12c"></script>
 </body>
 </html>

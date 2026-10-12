@@ -38,3 +38,4 @@ config/devices.local.yaml
 config/devices.yaml
 config/.backups/
 config/group_state.json*
+config/users.yaml*
