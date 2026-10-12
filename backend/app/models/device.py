@@ -11,6 +11,8 @@ class DeviceGroup(BaseModel):
     description: Optional[str] = None
     devices: List[Device]
     protected: bool = False
+    # Default-deny: a group is blocked unless it is protected, always_on, or switched on in the UI
+    always_on: bool = False
     auto_detect: bool = False
     enabled: bool = True
 

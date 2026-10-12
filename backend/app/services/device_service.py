@@ -1,3 +1,4 @@
+import json
 import yaml
 import logging
 import os
@@ -39,6 +40,7 @@ class DeviceService:
                         description=group_data.get('description', ''),
                         devices=devices,
                         protected=group_data.get('protected', False),
+                        always_on=group_data.get('always_on', False),
                         auto_detect=group_data.get('auto_detect', False),
                         enabled=True  # Default to enabled
                     ))
@@ -82,6 +84,50 @@ class DeviceService:
                 all_devices.extend(group.devices)
         return all_devices
     
+    # --- Default-deny: which groups reach the internet ---
+
+    def _state_path(self) -> str:
+        return os.path.join(os.path.dirname(self.config_path), "group_state.json")
+
+    def is_always_allowed(self, group: DeviceGroup) -> bool:
+        """Infrastructure and always_on groups (cameras, workstations) never need switching on."""
+        return group.protected or group.always_on
+
+    def get_enabled_groups(self) -> set:
+        """Names of the other groups the user switched on. Empty when nothing was ever switched on."""
+        try:
+            with open(self._state_path(), 'r') as f:
+                return set(json.load(f).get("enabled", []))
+        except FileNotFoundError:
+            return set()
+        except (ValueError, OSError, AttributeError) as e:
+            # An unreadable state fails closed: nothing is switched on
+            logger.error(f"Cannot read {self._state_path()}: {e}")
+            return set()
+
+    def set_group_enabled(self, group_name: str, enabled: bool) -> None:
+        names = self.get_enabled_groups()
+        if enabled:
+            names.add(group_name)
+        else:
+            names.discard(group_name)
+        tmp_path = f"{self._state_path()}.tmp"
+        with open(tmp_path, 'w') as f:
+            json.dump({"enabled": sorted(names)}, f, indent=2)
+        os.replace(tmp_path, self._state_path())
+
+    def is_group_enabled(self, group: DeviceGroup) -> bool:
+        """True when the group's devices are on the firewall allowlist (ignoring DROP blocks)."""
+        return self.is_always_allowed(group) or group.name in self.get_enabled_groups()
+
+    def get_allowed_devices(self) -> List[Device]:
+        """Devices that get an ACCEPT rule to the internet: everything else is dropped."""
+        allowed = []
+        for group in self.load_groups():
+            if not group.auto_detect and self.is_group_enabled(group):
+                allowed.extend(group.devices)
+        return allowed
+
     def get_devices_by_group(self, group_name: str) -> List[Device]:
         """Get all devices in a specific group"""
         group = self.get_group(group_name)
@@ -137,6 +183,7 @@ class DeviceService:
             result["groups"][group.name] = {
                 "description": group.description or "",
                 "protected": group.protected,
+                "always_on": group.always_on,
                 "devices": [
                     {"name": d.name, "mac": d.mac, "description": d.description}
                     for d in group.devices
@@ -185,6 +232,7 @@ class DeviceService:
             description=description or "",
             devices=[],
             protected=False,  # UI can never create protected groups
+            always_on=False,
             auto_detect=auto_detect,
             enabled=True,
         )

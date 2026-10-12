@@ -12,6 +12,7 @@ services:
     environment:
       - WAN_INTERFACE=${WAN_INTERFACE:-ppp0}
       - LAN_INTERFACE=${LAN_INTERFACE:-enp5s0}
+      - ALLOW_INTERFACES=${ALLOW_INTERFACES:-}
       - DRY_RUN=${DRY_RUN:-true}
       - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-this}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}

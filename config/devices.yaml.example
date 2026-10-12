@@ -1,10 +1,14 @@
 # Device Groups Configuration
 # Copy this file to devices.yaml and fill in your real MAC addresses
 # devices.yaml is gitignored and never committed
+#
+# Default-deny: a device reaches the internet only if its group is `protected`, `always_on`, or
+# switched on in the web UI (the switches are kept in config/group_state.json). Everything else,
+# listed or not, is dropped.
 
 groups:
   essential:
-    description: "Critical devices that should always have internet"
+    description: "Devices that get internet when you switch the group on"
     devices:
       - name: "example_phone"
         mac: "AA:BB:CC:DD:EE:01"
@@ -12,6 +16,7 @@ groups:
 
   security:
     description: "Security cameras and monitoring devices"
+    always_on: true   # default-deny: on the internet without being switched on, still blockable
     devices:
       - name: "example_camera"
         mac: "AA:BB:CC:DD:EE:02"

@@ -2,7 +2,7 @@
 
 ## 🔴 Intermittent connectivity loss when FORWARD policy = DROP
 
-**Status:** Unresolved, investigation paused (2026-08-02).
+**Status:** Unresolved, investigation paused (2026-08-02). Since 2026-10-12 default-deny is implemented in `sync_allowlist` (policy DROP, allowlist, accept-all rule removed from `FORWARD` and `DOCKER-USER`); if the symptom comes back after deploying it, start from the steps below.
 
 **Symptom:** When setting the `FORWARD` chain default policy to `DROP`
 (with the `nestnet-allow` allowlist rules and an `ESTABLISHED,RELATED`

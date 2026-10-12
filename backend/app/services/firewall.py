@@ -1,3 +1,5 @@
+import re
+import shlex
 import subprocess
 import logging
 from typing import List, Dict, Optional
@@ -13,6 +15,9 @@ class FirewallService:
         self.wan_interface = settings.wan_interface
         self.lan_interface = settings.lan_interface
         self.dry_run = settings.dry_run
+        self.allow_interfaces = [i.strip() for i in settings.allow_interfaces.split(",") if i.strip()]
+        self.MAC_RULE = re.compile(r"^-A FORWARD .*--mac-source (\S+) .*--comment nestnet-allow -j ACCEPT$")
+        self.INTERFACE_RULE = re.compile(r"^-A FORWARD -i (\S+) .*--comment nestnet-allow-if -j ACCEPT$")
         
     def _execute_command(self, command: List[str], description: str) -> Dict:
         """Execute iptables command or simulate in dry-run mode"""
@@ -109,62 +114,123 @@ class FirewallService:
         return results
 
     ALLOWLIST_TAG = "nestnet-allow"
+    INTERFACE_TAG = "nestnet-allow-if"
 
-    def sync_allowlist(self, all_devices: List[Device]) -> Dict:
+    def _iptables(self, args: List[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(["iptables", *args], capture_output=True, text=True)
+
+    def _rules(self, chain: str) -> List[str]:
+        """Rules of a chain as `-A CHAIN ...` lines; empty if the chain does not exist."""
+        result = self._iptables(["-S", chain])
+        if result.returncode != 0:
+            return []
+        return [l for l in result.stdout.splitlines() if l.startswith("-A ")]
+
+    def _delete_rule(self, rule: str, description: str) -> Dict:
+        return self._execute_command(["iptables", "-D", *shlex.split(rule)[1:]], description)
+
+    def _ensure_return_traffic_rule(self) -> None:
         """
-        Ensure only known devices (from devices.yaml) can reach the WAN.
-        Removes the broad LAN->WAN accept-all rule (one-time migration,
-        safe to call repeatedly), clears any previously-managed allow
-        rules, then re-adds one ACCEPT per known MAC. Block rules
-        (inserted at the top via -I) always take priority over these,
-        since these are appended at the bottom via -A.
-        Idempotent - safe to call on every startup and every reload.
+        Replies from the internet must reach the LAN or default-deny would break every allowed
+        device. The router already has this rule in DOCKER-USER; it is only added if missing.
+        """
+        chain = "DOCKER-USER" if self._iptables(["-S", "DOCKER-USER"]).returncode == 0 else "FORWARD"
+        for c in ("DOCKER-USER", "FORWARD"):
+            if any("ESTABLISHED" in r and f"-i {self.wan_interface} " in r and r.endswith("-j ACCEPT")
+                   for r in self._rules(c)):
+                return
+        self._execute_command(
+            ["iptables", "-I", chain, "1", "-i", self.wan_interface, "-m", "conntrack",
+             "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
+            f"RETURN TRAFFIC: accept replies from {self.wan_interface} in {chain}"
+        )
+
+    def sync_allowlist(self, devices: List[Device]) -> Dict:
+        """
+        Default-deny: only `devices` (and the interfaces in ALLOW_INTERFACES) can reach the WAN.
+
+        The caller passes the devices that are allowed right now (device_service.get_allowed_devices():
+        protected and always_on groups, plus the groups switched on in the UI). Everything else
+        falls to the FORWARD chain's DROP policy, including devices nobody has listed.
+
+        Order matters so nobody is cut by the sync itself: the new ACCEPT rules go in first, stale
+        ones are removed next, the policy becomes DROP, and only then the broad "LAN to WAN
+        accept all" rule is deleted (wherever it is: FORWARD or DOCKER-USER, whatever LAN
+        interface it names). Block rules inserted at the top (-I) still win over these ACCEPTs.
+        Idempotent: safe on every startup and every reload.
         """
         if self.dry_run:
-            logger.info(f"[DRY-RUN] Would sync allowlist for {len(all_devices)} known devices")
-            return {"success": True, "dry_run": True, "devices_count": len(all_devices)}
+            logger.info(f"[DRY-RUN] Would sync allowlist for {len(devices)} allowed devices")
+            return {"success": True, "dry_run": True, "devices_count": len(devices)}
 
-        # 1. Remove the broad LAN->WAN accept-all rule if still present
-        remove_wide = subprocess.run(
-            ["iptables", "-D", "FORWARD", "-i", self.lan_interface, "-o", self.wan_interface, "-j", "ACCEPT"],
-            capture_output=True, text=True
-        )
-        if remove_wide.returncode == 0:
-            logger.info(f"[EXECUTED] Removed broad accept-all rule ({self.lan_interface} -> {self.wan_interface})")
-
-        # 2. Remove previously-managed allowlist rules (tagged with our comment)
-        while True:
-            check = subprocess.run(
-                ["iptables", "-L", "FORWARD", "-v", "-n", "--line-numbers"],
-                capture_output=True, text=True
-            )
-            managed = [l for l in check.stdout.split("\n") if self.ALLOWLIST_TAG in l]
-            if not managed:
-                break
-            line_num = managed[0].split()[0]
-            subprocess.run(["iptables", "-D", "FORWARD", line_num], capture_output=True, text=True)
-
-        # 3. Add one ACCEPT per known MAC (deduplicated), appended at the end
+        self._ensure_return_traffic_rule()
         results = []
-        seen_macs = set()
-        for device in all_devices:
+
+        # 1. One ACCEPT per allowed MAC (deduplicated); stale and duplicate rules are removed
+        wanted = {}
+        for device in devices:
             mac = device.mac.upper()
-            if mac in seen_macs or "PENDIENTE" in mac or "REEMPLAZAR" in mac:
+            if "PENDIENTE" in mac or "REEMPLAZAR" in mac:
                 continue
-            seen_macs.add(mac)
-            command = [
-                "iptables", "-A", "FORWARD",
-                "-m", "mac", "--mac-source", mac,
-                "-o", self.wan_interface,
-                "-m", "comment", "--comment", self.ALLOWLIST_TAG,
-                "-j", "ACCEPT"
-            ]
-            result = self._execute_command(command, f"ALLOWLIST: {device.name} (mac: {mac})")
-            results.append(result)
+            wanted.setdefault(mac, device)
+        present = set()
+        for rule in self._rules("FORWARD"):
+            m = self.MAC_RULE.match(rule)
+            if not m:
+                continue
+            mac = m.group(1).upper()
+            if mac in wanted and mac not in present:
+                present.add(mac)
+            else:
+                results.append(self._delete_rule(rule, f"ALLOWLIST: remove stale rule (mac: {mac})"))
+        for mac, device in wanted.items():
+            if mac in present:
+                continue
+            results.append(self._execute_command(
+                ["iptables", "-A", "FORWARD", "-o", self.wan_interface,
+                 "-m", "mac", "--mac-source", mac, "-m", "comment", "--comment", self.ALLOWLIST_TAG,
+                 "-j", "ACCEPT"],
+                f"ALLOWLIST: {device.name} (mac: {mac})"
+            ))
+
+        # 2. Interfaces that are always allowed (WireGuard clients arrive on the Docker bridge)
+        wanted_ifs = set(self.allow_interfaces)
+        present_ifs = set()
+        for rule in self._rules("FORWARD"):
+            m = self.INTERFACE_RULE.match(rule)
+            if not m:
+                continue
+            if m.group(1) in wanted_ifs and m.group(1) not in present_ifs:
+                present_ifs.add(m.group(1))
+            else:
+                results.append(self._delete_rule(rule, f"ALLOWLIST: remove stale interface rule ({m.group(1)})"))
+        for iface in sorted(wanted_ifs - present_ifs):
+            results.append(self._execute_command(
+                ["iptables", "-A", "FORWARD", "-i", iface, "-o", self.wan_interface,
+                 "-m", "comment", "--comment", self.INTERFACE_TAG, "-j", "ACCEPT"],
+                f"ALLOWLIST: interface {iface}"
+            ))
+
+        # 3. Anything not accepted above is dropped
+        results.append(self._execute_command(
+            ["iptables", "-P", "FORWARD", "DROP"], "Setting FORWARD chain default policy to DROP"
+        ))
+
+        # 4. Last, the broad "accept every LAN client" rule goes away
+        removed_broad = 0
+        broad = re.compile(rf"^-A (FORWARD|DOCKER-USER) -i (\S+) -o {re.escape(self.wan_interface)} -j ACCEPT$")
+        for chain in ("DOCKER-USER", "FORWARD"):
+            for rule in self._rules(chain):
+                m = broad.match(rule)
+                if m and m.group(2) not in wanted_ifs:
+                    results.append(self._delete_rule(rule, f"DEFAULT-DENY: remove accept-all rule ({m.group(2)} -> {self.wan_interface}) from {chain}"))
+                    removed_broad += 1
 
         success = all(r.get("success", False) for r in results)
-        logger.info(f"Allowlist sync complete: {len(results)} devices allowed")
-        return {"success": success, "devices_count": len(results), "results": results}
+        logger.info(f"Allowlist sync complete: {len(wanted)} devices allowed, "
+                    f"{len(wanted_ifs)} interfaces allowed, {removed_broad} accept-all rules removed")
+        return {"success": success, "devices_count": len(wanted), "results": results,
+                "removed_accept_all": removed_broad}
 
     def get_current_rules(self) -> List[str]:
         """Get current iptables rules"""

@@ -5,6 +5,10 @@ class Settings(BaseSettings):
     # Network Configuration
     wan_interface: str = "ppp0"
     lan_interface: str = "enp5s0"
+    # Input interfaces whose traffic to the WAN is always accepted (comma-separated), for
+    # clients that are not identified by MAC: on the router, WireGuard runs in a container and
+    # its clients reach the host as one source on the Docker bridge (docker0)
+    allow_interfaces: str = ""
     
     # Application Settings
     dry_run: bool = True

@@ -70,8 +70,8 @@ graph TB
 2. FastAPI backend manages iptables firewall rules
 3. Web UI provides simple control interface
 4. Device groups defined by MAC address in YAML config
-5. **Default-deny model:** only devices listed in `devices.yaml` can reach the internet at all. On every app startup (and every "Reload Config"), the backend syncs an ACCEPT rule per known MAC and relies on the `FORWARD` chain's default DROP policy to block everything else — including unregistered/unknown devices, with no separate action needed
-6. Group blocking/unblocking (Quick Actions, toggles) adds/removes temporary DROP rules on top of the allowlist, taking priority over it
+5. **Default-deny model:** everything is blocked unless it is on the allowlist. A device is allowed when its group is `protected` (infrastructure), `always_on` (cameras, your own computers) or switched on in the UI. On every app startup (and every "Reload Config" or switch) the backend syncs one ACCEPT rule per allowed MAC, sets the `FORWARD` policy to DROP and deletes the broad "LAN to internet accept all" rule, so listed-but-off groups and unknown devices are cut with no separate action needed
+6. Blocking an `always_on` group (for example the cameras) adds temporary DROP rules on top of the allowlist, taking priority over it
 7. A separate host-level failsafe rule guarantees the control panel itself is always reachable, independent of any group/device blocking or the allowlist sync (see [Guaranteed Panel Access](#-guaranteed-panel-access-failsafe) below)
 
 ---
@@ -238,9 +238,9 @@ The dashboard shows:
 
 ### Quick Actions
 
-- **🚨 Only Essential + Security** - Block everything except essential devices and cameras (great for bedtime)
+- **🚨 Only Essential + Security** - Switch off every group except essential and cameras (great for bedtime)
 - **⚡ Only Essential** - Block everything except essential devices (deep focus mode)
-- **✅ Enable All** - Restore full network access to all groups
+- **✅ Enable All** - Switch on every group (and lift any block)
 - **🔄 Reload Config** - Reload device configuration from disk
 
 ### Managing Groups
@@ -323,19 +323,32 @@ Common setups:
 
 ### Default-Deny Model (Allowlist)
 
-**Only devices listed anywhere in `devices.yaml` can reach the internet.** This is enforced automatically:
+**By default the network is closed.** Only these reach the internet:
 
-- On every backend startup, and every time "Reload Config" is triggered, `sync_allowlist()` removes the broad LAN→WAN accept rule and replaces it with one `ACCEPT` rule per known MAC address (tagged with a `nestnet-allow` comment so re-syncs don't duplicate rules)
-- Any device **not** present in `devices.yaml` — a visitor's phone, an unregistered IoT gadget, anything new — is blocked by the `FORWARD` chain's default `DROP` policy, with no extra configuration needed
-- Group blocking (Quick Actions, individual toggles) still works exactly as before — those add temporary `DROP` rules that take priority over the allowlist
+| Who | How it is decided |
+|---|---|
+| Infrastructure (router, access point, media server) | group with `protected: true`, never blockable |
+| Cameras, your own computers | group with `always_on: true`; they work without being switched on, and can still be blocked on purpose |
+| WireGuard clients | the interfaces in `ALLOW_INTERFACES` (on the router `docker0`, where the WireGuard container's traffic arrives) |
+| Any other group (family phones, TVs, Echo...) | only while the group is switched on in the UI; the switch is remembered in `config/group_state.json` and survives restarts |
+| Anything not listed (a guest, a new gadget, a phone with a changed MAC) | never |
 
-**Practical implication:** if you add a new device to your network, it has **no internet access until you add its MAC to `devices.yaml`** and reload the config (or restart the container). This is the entire point of the model — but it does mean guests, new IoT purchases, etc. need a deliberate step before they'll work.
+How it is enforced:
+
+- On every backend startup, and every time a group is switched or "Reload Config" runs, `sync_allowlist()` makes the `FORWARD` chain match that table: it adds the missing ACCEPT rules (one per allowed MAC, tagged `nestnet-allow`, plus one per allowed interface, tagged `nestnet-allow-if`), removes stale ones, sets the policy to DROP, and **last** deletes any broad `-i <LAN> -o <WAN> -j ACCEPT` rule in `FORWARD` or Docker's `DOCKER-USER` chain, whatever LAN interface it names. That order means nobody is cut by the sync itself.
+- Replies from the internet are accepted by an `ESTABLISHED,RELATED` rule on the WAN interface; the sync adds it if it is missing.
+- Group blocking (Quick Actions, toggles on `always_on` groups) adds DROP rules at the top that win over the allowlist.
+- An unreadable `group_state.json` fails closed: no optional group is on.
+
+**Practical implication:** a new device has no internet until its MAC is in a group that is on. After editing `devices.yaml`:
 
 ```bash
 # After adding a device to devices.yaml:
 curl -X POST -u admin:yourpassword http://localhost:8003/devices/reload
 # or just click "Reload Config" in the web UI
 ```
+
+> The broad accept-all rule is not saved anywhere by this app. If your gateway restores it at boot (`/etc/iptables/rules.v4`), the network is open from boot until the backend starts; run `netfilter-persistent save` once after the first sync so a reboot comes back closed.
 
 ### ⚠️ MAC Address Reliability — Not All Devices Behave the Same
 
@@ -374,6 +387,7 @@ Groups are defined in `config/devices.yaml`. Each group has:
 - **description** - Human-readable description
 - **devices** - List of devices with MAC addresses
 - **protected** - If true, cannot be blocked (infrastructure only)
+- **always_on** - If true, the group reaches the internet without being switched on (cameras, workstations); it can still be blocked from the UI
 
 **Special Groups:**
 - **infrastructure** - Network equipment, always protected

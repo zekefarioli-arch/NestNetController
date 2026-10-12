@@ -37,8 +37,7 @@ app.include_router(logs_router)
 async def sync_allowlist_on_startup():
     """Ensure the firewall allowlist matches devices.yaml every time the app starts"""
     logger.info("Syncing device allowlist with devices.yaml...")
-    all_devices = device_service.get_all_devices()
-    firewall_service.sync_allowlist(all_devices)
+    firewall_service.sync_allowlist(device_service.get_allowed_devices())
 
 @app.get("/")
 async def root():

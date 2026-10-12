@@ -6,24 +6,42 @@ from .auth import get_current_user
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
+def _set_group_access(group, allow: bool) -> List[dict]:
+    """
+    Give or take a group's internet access. Default-deny means two mechanisms:
+    groups that are not always allowed are switched on and off in the allowlist (applied by
+    _sync_firewall); always-on groups (cameras) are blocked with DROP rules on top of it.
+    """
+    if device_service.is_always_allowed(group) and not group.protected:
+        if allow:
+            return firewall_service.unblock_group(group.devices, group.name)
+        return firewall_service.block_group(group.devices, group.name)
+    if not group.protected:
+        device_service.set_group_enabled(group.name, allow)
+    return []
+
+
+def _sync_firewall():
+    return firewall_service.sync_allowlist(device_service.get_allowed_devices())
+
+
 @router.get("/groups", response_model=List[DeviceGroup])
 async def get_groups(current_user: str = Depends(get_current_user)):
     """Get all device groups"""
     groups = device_service.load_groups()
     
-    # Check which groups are currently blocked
     blocked_macs = firewall_service.get_blocked_macs()
     
     for group in groups:
         if group.auto_detect:
             continue
         
-        # Check if any device in the group is blocked
+        # Active = on the allowlist (always-on groups, or switched on) and not under a DROP block
         group_blocked = any(
             device.mac.upper() in blocked_macs
             for device in group.devices
         )
-        group.enabled = not group_blocked
+        group.enabled = device_service.is_group_enabled(group) and not group_blocked
     
     return groups
 
@@ -52,18 +70,19 @@ async def toggle_group(
     
     # Check current state
     blocked_macs = firewall_service.get_blocked_macs()
-    is_blocked = any(device.mac.upper() in blocked_macs for device in group.devices)
+    is_blocked = (not device_service.is_group_enabled(group)) or any(
+        device.mac.upper() in blocked_macs for device in group.devices
+    )
     
     if is_blocked:
-        # Unblock the group
-        results = firewall_service.unblock_group(group.devices, group_name)
+        results = _set_group_access(group, True)
         action = "unblock"
         new_state = "enabled"
     else:
-        # Block the group
-        results = firewall_service.block_group(group.devices, group_name)
+        results = _set_group_access(group, False)
         action = "block"
         new_state = "disabled"
+    results.append(_sync_firewall())
     
     # Log the action
     success = all(r.get('success', False) for r in results)
@@ -94,7 +113,8 @@ async def enable_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
     
-    results = firewall_service.unblock_group(group.devices, group_name)
+    results = _set_group_access(group, True)
+    results.append(_sync_firewall())
     success = all(r.get('success', False) for r in results)
     
     logging_service.log_action(
@@ -128,7 +148,8 @@ async def disable_group(
             detail="Cannot block protected infrastructure group"
         )
     
-    results = firewall_service.block_group(group.devices, group_name)
+    results = _set_group_access(group, False)
+    results.append(_sync_firewall())
     success = all(r.get('success', False) for r in results)
     
     logging_service.log_action(
@@ -154,12 +175,13 @@ async def quick_action(
     groups = device_service.load_groups()
     results = []
     
+    def others(*keep):
+        return [g for g in groups if not g.protected and not g.auto_detect and g.name not in keep]
+
     if action.action == "enable_all":
-        # Enable all non-protected groups
-        for group in groups:
-            if not group.protected and not group.auto_detect:
-                group_results = firewall_service.unblock_group(group.devices, group.name)
-                results.extend(group_results)
+        for group in others():
+            results.extend(_set_group_access(group, True))
+        results.append(_sync_firewall())
         
         logging_service.log_action(
             user=current_user,
@@ -169,19 +191,13 @@ async def quick_action(
         )
     
     elif action.action == "only_essential":
-        # Block everything except essential
-        for group in groups:
-            if group.name == "essential" or group.protected:
-                continue
-            if not group.auto_detect:
-                group_results = firewall_service.block_group(group.devices, group.name)
-                results.extend(group_results)
-        
-        # Ensure essential is unblocked
+        # Everything off except essential (and the protected groups, which are never touched)
+        for group in others("essential"):
+            results.extend(_set_group_access(group, False))
         essential = device_service.get_group("essential")
         if essential:
-            essential_results = firewall_service.unblock_group(essential.devices, "essential")
-            results.extend(essential_results)
+            results.extend(_set_group_access(essential, True))
+        results.append(_sync_firewall())
         
         logging_service.log_action(
             user=current_user,
@@ -191,20 +207,14 @@ async def quick_action(
         )
     
     elif action.action == "only_essential_security":
-        # Block everything except essential and security
-        for group in groups:
-            if group.name in ["essential", "security"] or group.protected:
-                continue
-            if not group.auto_detect:
-                group_results = firewall_service.block_group(group.devices, group.name)
-                results.extend(group_results)
-        
-        # Ensure essential and security are unblocked
+        # Everything off except essential and security
+        for group in others("essential", "security"):
+            results.extend(_set_group_access(group, False))
         for group_name in ["essential", "security"]:
             group = device_service.get_group(group_name)
             if group:
-                group_results = firewall_service.unblock_group(group.devices, group_name)
-                results.extend(group_results)
+                results.extend(_set_group_access(group, True))
+        results.append(_sync_firewall())
         
         logging_service.log_action(
             user=current_user,
@@ -289,8 +299,7 @@ async def add_device(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    all_devices = device_service.get_all_devices()
-    firewall_service.sync_allowlist(all_devices)
+    _sync_firewall()
 
     logging_service.log_action(
         user=current_user,
@@ -314,8 +323,7 @@ async def delete_device(
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    all_devices = device_service.get_all_devices()
-    firewall_service.sync_allowlist(all_devices)
+    _sync_firewall()
 
     logging_service.log_action(
         user=current_user,
@@ -337,8 +345,7 @@ async def restore_backup(
         raise HTTPException(status_code=404, detail=str(e))
 
     groups = device_service.reload_configuration()
-    all_devices = device_service.get_all_devices()
-    firewall_service.sync_allowlist(all_devices)
+    _sync_firewall()
 
     logging_service.log_action(
         user=current_user, action="restore_backup", target=restored_from, success=True
@@ -357,8 +364,7 @@ async def reload_config(current_user: str = Depends(get_current_user)):
     """Reload device configuration from disk"""
     groups = device_service.reload_configuration()
 
-    all_devices = device_service.get_all_devices()
-    firewall_service.sync_allowlist(all_devices)
+    _sync_firewall()
 
     logging_service.log_action(
         user=current_user,
