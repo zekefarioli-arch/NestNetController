@@ -18,6 +18,7 @@
 - 🧪 **Safe Testing** - Dry-run mode to test without affecting your network
 - 📊 **Activity Logs** - Track who blocked/unblocked what and when
 - 🐳 **Docker Ready** - Simple deployment with docker-compose
+- 🚫 **Deny by default** - Nothing reaches the internet unless its group is protected, always on, or switched on in the UI; **WireGuard is the way in for everything else** (see [Architecture change](#-architecture-change-deny-by-default-and-wireguard))
 - 🔐 **Protected Groups** - Infrastructure devices (routers, switches) are never blocked
 - 🛡️ **Guaranteed Panel Access** - The control panel stays reachable from your LAN (and via WireGuard) no matter what gets blocked
 
@@ -73,6 +74,58 @@ graph TB
 5. **Default-deny model:** everything is blocked unless it is on the allowlist. A device is allowed when its group is `protected` (infrastructure), `always_on` (cameras, your own computers) or switched on in the UI. On every app startup (and every "Reload Config" or switch) the backend syncs one ACCEPT rule per allowed MAC, sets the `FORWARD` policy to DROP and deletes the broad "LAN to internet accept all" rule, so listed-but-off groups and unknown devices are cut with no separate action needed
 6. Blocking an `always_on` group (for example the cameras) adds temporary DROP rules on top of the allowlist, taking priority over it
 7. A separate host-level failsafe rule guarantees the control panel itself is always reachable, independent of any group/device blocking or the allowlist sync (see [Guaranteed Panel Access](#-guaranteed-panel-access-failsafe) below)
+
+---
+
+## 🔀 Architecture change: deny by default, and WireGuard
+
+Up to v1.0 the gateway worked the other way round: every LAN client had internet through one broad "LAN to internet, accept" rule, and the app only blocked groups on top of it. **Now the network is closed by default.** A device gets internet only if someone decided so.
+
+```mermaid
+flowchart LR
+    subgraph before["Before: open, then block"]
+        direction TB
+        b1["LAN client"] --> b2["accept-all rule"] --> b3(["Internet"])
+        b4["group block<br/>DROP on top"] -.-> b2
+    end
+    subgraph now["Now: closed, then allow"]
+        direction TB
+        n1["LAN client"] --> n2{"FORWARD<br/>policy DROP"}
+        n2 -->|"MAC in a protected,<br/>always_on or switched-on group"| n3(["Internet"])
+        n2 -->|"anything else"| n4["dropped"]
+        w["WireGuard client"] -->|"UDP 51820 to the gateway,<br/>leaves through docker0"| n3
+    end
+```
+
+| Question | Before | Now |
+|---|---|---|
+| New or unknown device | has internet | has none |
+| Family phones, TVs, Echo | always on, blockable | off until the group is switched on in the UI |
+| Cameras, your own computers | like everyone | always on (`always_on`), still blockable on purpose |
+| Infrastructure | protected | protected |
+| What does "block a group" do | add DROP rules | for switchable groups, take them off the allowlist; for `always_on` groups, add DROP rules |
+| The accept-all rule | present, never removed (it lived in `DOCKER-USER`, the app looked in `FORWARD` on the wrong interface) | removed by the app on every sync, last, after the allow rules and the DROP policy are in place |
+| State of switchable groups | none | `config/group_state.json`, survives restarts, unreadable means everything off |
+
+### You have to use WireGuard
+
+Phones are the problem: Android rotates the MAC address per network, so a phone is never reliably "listed", and a phone that is not allowed has no internet on your own Wi-Fi. The way around it is the tunnel:
+
+- **Your phones and laptops connect through WireGuard** (also at home). The tunnel is authenticated by its key, not by a MAC, and its traffic is allowed explicitly: the packets reach the gateway on UDP 51820 (the gateway's own traffic, not forwarded), and what leaves for the internet goes out through the WireGuard container's bridge, which `ALLOW_INTERFACES=docker0` accepts. Tested on a phone on 2026-10-12: on the house Wi-Fi it had no internet without WireGuard and had it with WireGuard on, with mobile data off.
+- **Anything that cannot run WireGuard** (cameras, TVs, Echo, printers) is listed by MAC in a group, because its MAC does not change.
+- **Every WireGuard key is a way to the internet through your house**, whatever its MAC. Revoke keys you no longer use in the WireGuard panel.
+- If your phone loses its internet by accident, turn on WireGuard (or mobile data and then WireGuard), open the panel and switch its group on or add the new MAC.
+
+If your gateway runs WireGuard on the host instead of in a container, put its interface (`wg0`) in `ALLOW_INTERFACES`, because it appears directly as a network interface of the host.
+
+### Upgrading an existing gateway
+
+1. Pull the new code. Copy nothing else: `devices.yaml` is yours.
+2. Add `always_on: true` to the groups that must keep internet without being switched on (cameras, your computers), or the new code will cut them like any other group. `protected` groups need nothing.
+3. Add `ALLOW_INTERFACES=docker0` (or your WireGuard interface) to `.env`. If the file does not end with a newline, add one first: appending to the last line breaks the file.
+4. Rebuild: `docker compose up -d --build nestnet-backend`. The sync removes the accept-all rule itself.
+5. Test with a roll back ready: stop the container and put the accept-all rule back if you are cut off (see [Locked yourself out](#locked-yourself-out)).
+6. When you are happy, save the rules so a reboot comes back closed: `sudo netfilter-persistent save`. Otherwise `/etc/iptables/rules.v4` brings the accept-all rule back until the container starts.
 
 ---
 
@@ -374,7 +427,7 @@ Modern Android versions use a **randomized MAC address per WiFi network** by def
 **Current workaround: always keep a WireGuard connection available.** This isn't just for being away from home — it also recovers you when you're on your own WiFi and got cut off:
 
 - **Why LAN access alone doesn't save you:** the MAC allowlist only gates outbound *internet* access (the `FORWARD` chain, matched against `nestnet-allow` rules). It never gates LAN access — any device on your home WiFi can always reach the panel locally. The problem is that once a phone's MAC gets blocked, that phone has **no internet at all, WiFi included** — so even though the panel is technically reachable on the LAN, the phone itself can't get there because it has no connectivity to route through.
-- **Why WireGuard fixes it:** WireGuard isn't "a device on the LAN asking to go out" — it's a tunnel that places you *inside* the LAN, authenticated by the tunnel's own key rather than by MAC address. It never touches the `FORWARD`/allowlist check at all.
+- **Why WireGuard fixes it:** WireGuard isn't "a device on the LAN asking to go out" — it's a tunnel that places you *inside* the LAN, authenticated by the tunnel's own key rather than by MAC address. The tunnel itself is not matched by MAC; its traffic out to the internet is allowed through `ALLOW_INTERFACES` (see [Architecture change](#-architecture-change-deny-by-default-and-wireguard)).
 - **At home, WiFi cut off by a MAC block:** switch that phone to mobile data, connect via WireGuard, and you're back inside the LAN with a working connection to the panel — from there you can re-enable the group or add the new MAC.
 - **Away from home:** same thing — WireGuard over mobile data gets you in regardless of any group block currently active.
 
@@ -550,12 +603,12 @@ sudo iptables -L FORWARD -v -n
 
 If you've set up the [panel-access failsafe](#-guaranteed-panel-access-failsafe), this shouldn't happen — the panel stays reachable regardless of device/group blocking. If you still can't reach it:
 
-**SSH into gateway and reset:**
+**SSH into the gateway and open the network again** (stop the app so it does not close it again, then put the accept-all rule back; use your LAN and WAN interface names):
 ```bash
-docker compose down
-sudo iptables -P FORWARD ACCEPT
-sudo iptables -F FORWARD
+docker stop nestnet-api
+sudo iptables -I DOCKER-USER 2 -i enp7s0f0 -o ppp0 -j ACCEPT
 ```
+Do not flush `FORWARD`: it also holds Docker's jumps.
 
 **Or from console:**
 ```bash
@@ -578,7 +631,7 @@ docker compose down
 - [x] Dry-run testing mode
 - [x] Docker containerization
 - [x] Guaranteed, device-list-independent panel access (host-level failsafe)
-- [x] Default-deny firewall model — only devices in devices.yaml get internet access
+- [x] Default-deny firewall model — only protected, always-on or switched-on groups get internet access; WireGuard is allowed by interface (tested on a real gateway, 2026-10-12)
 
 ### 🚧 In Progress
 - [ ] Fix config volume mounting issue
