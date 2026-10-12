@@ -162,3 +162,19 @@ details[open] .chev { transform: rotate(180deg); }
 
 /* A busy row-button (scenes) dims; levers have their own pulse */
 .is-busy:not(.lever) { opacity: 0.6; }
+
+/* Scenes: a bordered button with an obvious "Apply", so it reads as pressable */
+.scene {
+    border: 1px solid var(--muted); border-radius: 10px; background: var(--surface);
+    transition: background-color 150ms ease-out, border-color 150ms ease-out;
+    cursor: pointer;
+}
+.scene:hover { background: color-mix(in srgb, var(--ink) 6%, var(--surface)); border-color: var(--ink); }
+.scene:active { background: color-mix(in srgb, var(--ink) 11%, var(--surface)); }
+.scene-apply {
+    display: inline-flex; align-items: center; gap: 0.375rem; flex: none;
+    min-height: 40px; padding: 0 1rem; border-radius: 6px;
+    background: var(--ink); color: var(--bg); font-weight: 600; font-size: 0.9375rem;
+}
+.scene:hover .scene-apply { background: color-mix(in srgb, var(--ink) 88%, var(--bg)); }
+.scene.btn-busy::after { display: none; }

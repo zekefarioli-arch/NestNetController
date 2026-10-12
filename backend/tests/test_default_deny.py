@@ -198,3 +198,50 @@ def test_quick_action_only_essential_leaves_only_essential_on(client, auth_heade
     client.post("/devices/quick-action", json={"action": "only_essential"}, headers=auth_headers)
     states = {g["name"]: g["enabled"] for g in client.get("/devices/groups", headers=auth_headers).json()}
     assert states["essential"] is True and states["media"] is False
+
+
+# --- always-on groups cannot be switched off, by any route ---
+
+@pytest.fixture
+def locked_groups():
+    """essential and security always on, as on the router; media stays switchable."""
+    groups = device_service.load_groups()
+    for g in groups:
+        if g.name in ("essential", "security"):
+            g.always_on = True
+    device_service.save_groups(groups)
+
+
+def states(client, auth_headers):
+    return {g["name"]: g["enabled"] for g in client.get("/devices/groups", headers=auth_headers).json()}
+
+
+@pytest.mark.parametrize("group", ["essential", "security", "infrastructure"])
+@pytest.mark.parametrize("route", ["toggle", "disable"])
+def test_always_on_groups_refuse_to_be_switched_off(client, auth_headers, locked_groups, group, route):
+    r = client.post(f"/devices/groups/{group}/{route}", headers=auth_headers)
+    assert r.status_code == 403
+    assert "always on" in r.json()["detail"]
+    assert states(client, auth_headers)[group] is True
+    assert group not in device_service.get_enabled_groups()
+    assert {"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02", "AA:BB:CC:DD:EE:F1"} <= {d.mac for d in device_service.get_allowed_devices()}
+
+
+@pytest.mark.parametrize("action", ["only_essential", "only_essential_security", "enable_all"])
+def test_scenes_never_switch_off_an_always_on_group(client, auth_headers, locked_groups, action):
+    client.post("/devices/groups/media/enable", headers=auth_headers)
+    r = client.post("/devices/quick-action", json={"action": action}, headers=auth_headers)
+    assert r.status_code == 200
+    s = states(client, auth_headers)
+    assert s["essential"] is True and s["security"] is True and s["infrastructure"] is True
+    assert s["media"] is (action == "enable_all")
+
+
+def test_a_leftover_block_rule_does_not_show_an_always_on_group_as_off(client, auth_headers, locked_groups):
+    with patch("app.routers.devices.firewall_service.get_blocked_macs", return_value=["AA:BB:CC:DD:EE:02"]):
+        assert states(client, auth_headers)["security"] is True
+
+
+def test_enabling_an_always_on_group_is_harmless(client, auth_headers, locked_groups):
+    r = client.post("/devices/groups/security/enable", headers=auth_headers)
+    assert r.status_code == 200 and r.json()["success"] is True

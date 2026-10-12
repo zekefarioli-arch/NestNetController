@@ -39,7 +39,7 @@ All colours are CSS variables on `:root` (light) and `.dark`; components never h
 - A recessed track with a sliding slug. Off: slug on the left, track empty. On: slug on the right, track filled with `--lamp-fill`.
 - State is never colour alone: slug position, the engraved `I` and `O` on the track, and the words "Internet on" / "Internet off" beside it.
 - 44px minimum hit area, a real `<button role="switch" aria-checked>`, keyboard operable, visible focus ring.
-- Protected groups have no lever: a lock icon and the words "Always on". Changing the state of a lever is a request to the server; the lever shows a busy state until the server answers and then redraws from the server's answer, never optimistically.
+- Protected and always-on groups (equipment, cameras, essential devices) have no lever: a lock icon and the words "Always on". The backend refuses to switch them off, so the interface never offers it. Changing the state of a lever is a request to the server; the lever shows a busy state until the server answers and then redraws from the server's answer, never optimistically.
 
 ## 6. Layout
 - Mobile first. From 1024px two columns, 5/7: the statement and the scenes on the left, the breakers and the activity on the right.
@@ -49,7 +49,7 @@ All colours are CSS variables on `:root` (light) and `.dark`; components never h
 ## 7. Components and states
 - Every control defines default, hover, focus-visible, active, disabled and busy.
 - Every data view has a loading state (skeleton rows, not a spinner), an empty state (what it is + the next action) and an error state (what happened + a retry).
-- One filled primary button per view (sign in). Scenes are outline buttons.
+- One filled primary button per view (sign in). Scenes are the exception to "no boxes": an action has to look pressable, so each scene is a bordered button with a visible "Apply" chip. Never rely on a person guessing that text is a control.
 - Labels always visible above inputs. Errors say what to do.
 
 ## 8. Icons

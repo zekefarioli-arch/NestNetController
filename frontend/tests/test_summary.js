@@ -31,6 +31,7 @@ assert.strictEqual(NN.relativeTime('2026-10-12T11:00:00+00:00', now), '3 h ago')
 // activity sentences share the names of the buttons
 assert.strictEqual(NN.activitySentence({ action: 'disable_group', target: 'media' }), 'Media turned off');
 assert.strictEqual(NN.activitySentence({ action: 'unblock_group', target: 'zeke_phone' }), 'Zeke phone turned on');
+assert.strictEqual(NN.sceneLabel('only_essential'), 'Essential only');
 assert.strictEqual(NN.activitySentence({ action: 'only_essential_security', target: 'quick_action' }), 'Scene: Essential and cameras');
 assert.strictEqual(NN.activitySentence({ action: 'add_device', target: 'media/AA:BB' }), 'Device added to Media');
 assert.strictEqual(NN.activitySentence({ action: 'something_new', target: 'x' }), 'Something new');

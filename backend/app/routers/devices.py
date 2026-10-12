@@ -6,18 +6,20 @@ from .auth import get_current_user
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
+def _locked_detail(group) -> str:
+    return f"Group '{group.name}' is always on and cannot be switched off"
+
+
 def _set_group_access(group, allow: bool) -> List[dict]:
     """
-    Give or take a group's internet access. Default-deny means two mechanisms:
-    groups that are not always allowed are switched on and off in the allowlist (applied by
-    _sync_firewall); always-on groups (cameras) are blocked with DROP rules on top of it.
+    Give or take a switchable group's internet access: it is switched on or off in the
+    allowlist (applied by _sync_firewall). Groups that are always allowed (protected or
+    always_on: infrastructure, cameras, your computers) have no switch, so this never
+    touches them, whatever the caller asks.
     """
-    if device_service.is_always_allowed(group) and not group.protected:
-        if allow:
-            return firewall_service.unblock_group(group.devices, group.name)
-        return firewall_service.block_group(group.devices, group.name)
-    if not group.protected:
-        device_service.set_group_enabled(group.name, allow)
+    if device_service.is_always_allowed(group):
+        return []
+    device_service.set_group_enabled(group.name, allow)
     return []
 
 
@@ -36,12 +38,15 @@ async def get_groups(current_user: str = Depends(get_current_user)):
         if group.auto_detect:
             continue
         
-        # Active = on the allowlist (always-on groups, or switched on) and not under a DROP block
+        # Always-on groups are on no matter what; the others are on when switched on
+        # (and not under an old DROP block)
         group_blocked = any(
             device.mac.upper() in blocked_macs
             for device in group.devices
         )
-        group.enabled = device_service.is_group_enabled(group) and not group_blocked
+        group.enabled = device_service.is_always_allowed(group) or (
+            device_service.is_group_enabled(group) and not group_blocked
+        )
     
     return groups
 
@@ -56,11 +61,8 @@ async def toggle_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
     
-    if group.protected:
-        raise HTTPException(
-            status_code=403,
-            detail="Cannot block protected infrastructure group"
-        )
+    if device_service.is_always_allowed(group):
+        raise HTTPException(status_code=403, detail=_locked_detail(group))
     
     if group.auto_detect:
         raise HTTPException(
@@ -142,11 +144,8 @@ async def disable_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
     
-    if group.protected:
-        raise HTTPException(
-            status_code=403,
-            detail="Cannot block protected infrastructure group"
-        )
+    if device_service.is_always_allowed(group):
+        raise HTTPException(status_code=403, detail=_locked_detail(group))
     
     results = _set_group_access(group, False)
     results.append(_sync_firewall())
@@ -176,7 +175,7 @@ async def quick_action(
     results = []
     
     def others(*keep):
-        return [g for g in groups if not g.protected and not g.auto_detect and g.name not in keep]
+        return [g for g in groups if not device_service.is_always_allowed(g) and not g.auto_detect and g.name not in keep]
 
     if action.action == "enable_all":
         for group in others():

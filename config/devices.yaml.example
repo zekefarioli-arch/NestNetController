@@ -16,7 +16,7 @@ groups:
 
   security:
     description: "Security cameras and monitoring devices"
-    always_on: true   # default-deny: on the internet without being switched on, still blockable
+    always_on: true   # always has internet and has no switch: the panel and the API cannot turn it off
     devices:
       - name: "example_camera"
         mac: "AA:BB:CC:DD:EE:02"

@@ -244,13 +244,17 @@ function renderError(container, what) {
         </div>`;
 }
 
-// Scenes: presets that change several groups at once
+// Scenes: presets that change several groups at once. Drawn as buttons, with an
+// "Apply" that looks pressable, so nobody has to guess that the card is the control.
 function renderScenes() {
     document.getElementById('scenes').innerHTML = SCENES.map(scene => `
         <button type="button" onclick="quickAction('${scene.action}', this)"
-                class="flex min-h-[44px] w-full flex-col items-start py-4 text-left hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] disabled:opacity-60">
-            <span class="js-label font-semibold">${escapeHtml(scene.label)}</span>
-            <span class="text-sm text-muted">${escapeHtml(scene.hint)}</span>
+                class="scene flex min-h-[44px] w-full items-center justify-between gap-4 p-4 text-left disabled:cursor-progress">
+            <span class="min-w-0">
+                <span class="block font-semibold">${escapeHtml(scene.label)}</span>
+                <span class="block text-sm text-muted">${escapeHtml(scene.hint)}</span>
+            </span>
+            <span class="scene-apply">${icon('play', 'icon-sm')}<span class="js-label">Apply</span></span>
         </button>`).join('');
 }
 
@@ -277,8 +281,10 @@ function renderStatement(groups) {
 
 function renderGroups(groups) {
     const real = groups.filter(group => !group.auto_detect); // auto-detect groups are not built yet
-    const switchable = real.filter(group => !group.protected);
-    const locked = real.filter(group => group.protected);
+    // A group with no lever: protected equipment or an always-on group (cameras, essential)
+    const isLocked = group => group.protected || group.always_on;
+    const switchable = real.filter(group => !isLocked(group));
+    const locked = real.filter(isLocked);
 
     const container = document.getElementById('groupsContainer');
     container.innerHTML = switchable.length

@@ -63,16 +63,18 @@
         return parseTimestamp(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
     }
 
-    // One name per action through the whole flow: the button, the toast and the activity line
+    // One name per action through the whole flow: the button, the toast and the activity line.
+    // Essential and the cameras are always on, so the only scene that turns things off is the first.
     const SCENES = [
-        { action: 'only_essential_security', label: 'Essential and cameras', hint: 'Turns every other group off.' },
-        { action: 'only_essential', label: 'Essential only', hint: 'Turns the cameras off too.' },
+        { action: 'only_essential_security', label: 'Essential and cameras', hint: 'Turns every other group off. These two stay on.' },
         { action: 'enable_all', label: 'Everything on', hint: 'Turns every group on.' },
     ];
+    // Older actions that may still be in the activity log
+    const LEGACY_SCENE_LABELS = { only_essential: 'Essential only' };
 
     function sceneLabel(action) {
         const scene = SCENES.find(s => s.action === action);
-        return scene ? scene.label : displayName(action);
+        return scene ? scene.label : (LEGACY_SCENE_LABELS[action] || displayName(action));
     }
 
     function activitySentence(log) {
