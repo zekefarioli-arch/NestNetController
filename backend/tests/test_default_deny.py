@@ -245,3 +245,42 @@ def test_a_leftover_block_rule_does_not_show_an_always_on_group_as_off(client, a
 def test_enabling_an_always_on_group_is_harmless(client, auth_headers, locked_groups):
     r = client.post("/devices/groups/security/enable", headers=auth_headers)
     assert r.status_code == 200 and r.json()["success"] is True
+
+
+# --- open mode: "Everything on" trusts the Wi-Fi password (phones randomise their MAC) ---
+
+OPEN_RULE = "-A FORWARD -o ppp0 -m comment --comment nestnet-open -j ACCEPT"
+
+
+def test_open_mode_adds_one_accept_all_rule_and_closing_removes_it(live):
+    fake = FakeIptables(forward=[allow_rule("AA:BB:CC:DD:EE:F1")])
+    with patch("app.services.firewall.subprocess.run", side_effect=fake.run):
+        firewall_service.sync_allowlist([Device(name="a", mac="AA:BB:CC:DD:EE:F1")], open_mode=True)
+        firewall_service.sync_allowlist([Device(name="a", mac="AA:BB:CC:DD:EE:F1")], open_mode=True)
+        assert fake.chains["FORWARD"].count(OPEN_RULE) == 1
+        firewall_service.sync_allowlist([Device(name="a", mac="AA:BB:CC:DD:EE:F1")], open_mode=False)
+    assert OPEN_RULE not in fake.chains["FORWARD"]
+    assert allow_rule("AA:BB:CC:DD:EE:F1") in fake.chains["FORWARD"]
+    assert fake.policy == "DROP"
+
+
+def test_open_mode_is_off_by_default_and_switching_a_group_off_ends_it():
+    assert device_service.is_open_mode() is False
+    device_service.set_group_enabled("media", True)
+    device_service.set_open_mode(True)
+    assert device_service.is_open_mode() is True and "media" in device_service.get_enabled_groups()
+    device_service.set_group_enabled("media", False)
+    assert device_service.is_open_mode() is False
+
+
+def test_unreadable_state_is_not_open_mode():
+    with open(device_service._state_path(), "w") as f:
+        f.write("{not json")
+    assert device_service.is_open_mode() is False
+
+
+def test_enable_all_opens_and_any_other_scene_closes(client, auth_headers):
+    client.post("/devices/quick-action", json={"action": "enable_all"}, headers=auth_headers)
+    assert device_service.is_open_mode() is True
+    client.post("/devices/quick-action", json={"action": "only_essential_security"}, headers=auth_headers)
+    assert device_service.is_open_mode() is False

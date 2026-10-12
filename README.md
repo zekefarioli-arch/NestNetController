@@ -115,6 +115,7 @@ Phones are the problem: Android rotates the MAC address per network, so a phone 
 - **Your phones and laptops connect through WireGuard** (also at home). The tunnel is authenticated by its key, not by a MAC, and its traffic is allowed explicitly: the packets reach the gateway on UDP 51820 (the gateway's own traffic, not forwarded), and what leaves for the internet goes out through the WireGuard container's bridge, which `ALLOW_INTERFACES=docker0` accepts. Tested on a phone on 2026-10-12: on the house Wi-Fi it had no internet without WireGuard and had it with WireGuard on, with mobile data off.
 - **Anything that cannot run WireGuard** (cameras, TVs, Echo, printers) is listed by MAC in a group, because its MAC does not change.
 - **Every WireGuard key is a way to the internet through your house**, whatever its MAC. Revoke keys you no longer use in the WireGuard panel.
+- **Open mode** (the "Everything on" scene) is the other way: while it lasts, every device with the Wi-Fi password has internet, whatever its MAC.
 - If your phone loses its internet by accident, turn on WireGuard (or mobile data and then WireGuard), open the panel and switch its group on or add the new MAC.
 
 If your gateway runs WireGuard on the host instead of in a container, put its interface (`wg0`) in `ALLOW_INTERFACES`, because it appears directly as a network interface of the host.
@@ -295,7 +296,7 @@ The dashboard shows:
 Presets that change several groups at once:
 
 - **Essential and cameras** - Turns every other switchable group off (great for bedtime); locked groups stay on
-- **Everything on** - Turns every switchable group on
+- **Everything on** - Turns every switchable group on **and enters open mode**: one extra rule (tagged `nestnet-open`) lets any device on the network reach the internet, listed or not, so a phone with a randomised MAC works with just the Wi-Fi password. Switching any group off, or applying another scene, ends open mode and goes back to the MAC list. Devices blocked by hand stay blocked
 - **Reload devices** - Re-reads `devices.yaml` (a small button above the breakers)
 
 ### Managing Groups

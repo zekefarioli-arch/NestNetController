@@ -24,7 +24,7 @@ def _set_group_access(group, allow: bool) -> List[dict]:
 
 
 def _sync_firewall():
-    return firewall_service.sync_allowlist(device_service.get_allowed_devices())
+    return firewall_service.sync_allowlist(device_service.get_allowed_devices(), device_service.is_open_mode())
 
 
 @router.get("/groups", response_model=List[DeviceGroup])
@@ -177,9 +177,13 @@ async def quick_action(
     def others(*keep):
         return [g for g in groups if not device_service.is_always_allowed(g) and not g.auto_detect and g.name not in keep]
 
+    if action.action != "enable_all":
+        device_service.set_open_mode(False)
+
     if action.action == "enable_all":
         for group in others():
             results.extend(_set_group_access(group, True))
+        device_service.set_open_mode(True)
         results.append(_sync_firewall())
         
         logging_service.log_action(

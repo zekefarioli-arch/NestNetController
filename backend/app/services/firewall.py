@@ -115,6 +115,7 @@ class FirewallService:
 
     ALLOWLIST_TAG = "nestnet-allow"
     INTERFACE_TAG = "nestnet-allow-if"
+    OPEN_TAG = "nestnet-open"
 
     def _iptables(self, args: List[str]) -> subprocess.CompletedProcess:
         return subprocess.run(["iptables", *args], capture_output=True, text=True)
@@ -145,7 +146,7 @@ class FirewallService:
             f"RETURN TRAFFIC: accept replies from {self.wan_interface} in {chain}"
         )
 
-    def sync_allowlist(self, devices: List[Device]) -> Dict:
+    def sync_allowlist(self, devices: List[Device], open_mode: bool = False) -> Dict:
         """
         Default-deny: only `devices` (and the interfaces in ALLOW_INTERFACES) can reach the WAN.
 
@@ -157,6 +158,8 @@ class FirewallService:
         ones are removed next, the policy becomes DROP, and only then the broad "LAN to WAN
         accept all" rule is deleted (wherever it is: FORWARD or DOCKER-USER, whatever LAN
         interface it names). Block rules inserted at the top (-I) still win over these ACCEPTs.
+        With open_mode ("Everything on") one extra tagged rule lets every client reach the WAN, for
+        phones whose randomised MAC is on no list; it is removed again as soon as open_mode is off.
         Idempotent: safe on every startup and every reload.
         """
         if self.dry_run:
@@ -210,6 +213,18 @@ class FirewallService:
                  "-m", "comment", "--comment", self.INTERFACE_TAG, "-j", "ACCEPT"],
                 f"ALLOWLIST: interface {iface}"
             ))
+
+        # 2b. Open mode: one tagged accept-all rule (the tag keeps step 4 from deleting it)
+        open_rules = [r for r in self._rules("FORWARD") if f"--comment {self.OPEN_TAG} " in r]
+        if open_mode and not open_rules:
+            results.append(self._execute_command(
+                ["iptables", "-A", "FORWARD", "-o", self.wan_interface,
+                 "-m", "comment", "--comment", self.OPEN_TAG, "-j", "ACCEPT"],
+                "OPEN MODE: every client may reach the internet"
+            ))
+        elif not open_mode:
+            for rule in open_rules:
+                results.append(self._delete_rule(rule, "OPEN MODE ended: remove accept-all rule"))
 
         # 3. Anything not accepted above is dropped
         results.append(self._execute_command(

@@ -93,28 +93,49 @@ class DeviceService:
         """Infrastructure and always_on groups (cameras, workstations) never need switching on."""
         return group.protected or group.always_on
 
-    def get_enabled_groups(self) -> set:
-        """Names of the other groups the user switched on. Empty when nothing was ever switched on."""
+    def _read_state(self) -> dict:
         try:
             with open(self._state_path(), 'r') as f:
-                return set(json.load(f).get("enabled", []))
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
         except FileNotFoundError:
-            return set()
-        except (ValueError, OSError, AttributeError) as e:
-            # An unreadable state fails closed: nothing is switched on
+            return {}
+        except (ValueError, OSError) as e:
+            # An unreadable state fails closed: nothing is switched on and open mode is off
             logger.error(f"Cannot read {self._state_path()}: {e}")
-            return set()
+            return {}
+
+    def _write_state(self, enabled: set, open_mode: bool) -> None:
+        tmp_path = f"{self._state_path()}.tmp"
+        with open(tmp_path, 'w') as f:
+            json.dump({"enabled": sorted(enabled), "open": bool(open_mode)}, f, indent=2)
+        os.replace(tmp_path, self._state_path())
+
+    def get_enabled_groups(self) -> set:
+        """Names of the other groups the user switched on. Empty when nothing was ever switched on."""
+        enabled = self._read_state().get("enabled", [])
+        return set(enabled) if isinstance(enabled, list) else set()
+
+    def is_open_mode(self) -> bool:
+        """
+        True after "Everything on": any device on the network gets internet, listed or not.
+        Phones randomise their Wi-Fi MAC, so the MAC allowlist cannot be trusted to find them;
+        this mode trusts the Wi-Fi password instead. Any group switched off ends it.
+        """
+        return self._read_state().get("open") is True
+
+    def set_open_mode(self, open_mode: bool) -> None:
+        self._write_state(self.get_enabled_groups(), open_mode)
 
     def set_group_enabled(self, group_name: str, enabled: bool) -> None:
         names = self.get_enabled_groups()
+        open_mode = self.is_open_mode()
         if enabled:
             names.add(group_name)
         else:
             names.discard(group_name)
-        tmp_path = f"{self._state_path()}.tmp"
-        with open(tmp_path, 'w') as f:
-            json.dump({"enabled": sorted(names)}, f, indent=2)
-        os.replace(tmp_path, self._state_path())
+            open_mode = False
+        self._write_state(names, open_mode)
 
     def is_group_enabled(self, group: DeviceGroup) -> bool:
         """True when the group's devices are on the firewall allowlist (ignoring DROP blocks)."""
