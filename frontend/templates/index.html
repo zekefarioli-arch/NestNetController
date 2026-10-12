@@ -3,111 +3,159 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NestNetController 🏠</title>
+    <meta name="color-scheme" content="light dark">
+    <title>NestNet panel</title>
+    <!-- The saved theme (or the system one) is applied before the first paint: no flash of the wrong theme -->
+    <script>
+        (function () {
+            var saved = null;
+            try { saved = localStorage.getItem('theme'); } catch (e) {}
+            var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.classList.toggle('dark', dark);
+        })();
+    </script>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="preload" href="/static/fonts/barlow-condensed-600.woff2" as="font" type="font/woff2" crossorigin>
     <script src="/static/js/tailwind.js"></script>
     <script>
+        // Colours are the tokens of app.css, so there is one source of truth for both themes
         tailwind.config = {
+            darkMode: 'class',
             theme: {
                 extend: {
                     colors: {
-                        primary: '#3b82f6',
-                        secondary: '#64748b',
-                        success: '#10b981',
-                        danger: '#ef4444',
-                        warning: '#f59e0b',
-                    }
+                        bg: 'var(--bg)', surface: 'var(--surface)', ink: 'var(--ink)', muted: 'var(--muted)',
+                        line: 'var(--border)', lamp: 'var(--lamp)', danger: 'var(--danger)', warning: 'var(--warning)',
+                    },
+                    fontFamily: { display: ['"Barlow Condensed"', 'Barlow', 'sans-serif'] },
                 }
             }
         }
     </script>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <!-- Login Modal -->
-    <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">🏠 NestNetController</h2>
-            <form id="loginForm" class="space-y-4">
+<body class="min-h-screen">
+    <svg xmlns="http://www.w3.org/2000/svg" class="hidden" aria-hidden="true" focusable="false"><!-- Lucide (ISC) -->
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+    <symbol id="i-flask-conical" viewBox="0 0 24 24"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2" /> <path d="M6.453 15h11.094" /> <path d="M8.5 2h7" /></symbol>
+    <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" /></symbol>
+    <symbol id="i-log-out" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /> <polyline points="16 17 21 12 16 7" /> <line x1="21" x2="9" y1="12" y2="12" /></symbol>
+    <symbol id="i-moon-star" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9" /> <path d="M20 3v4" /> <path d="M22 5h-4" /></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10" /> <path d="M18.4 6.6a9 9 0 1 1-12.77.04" /></symbol>
+    <symbol id="i-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /> <path d="M21 3v5h-5" /> <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /> <path d="M8 16H3v5" /></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /> <path d="M12 2v2" /> <path d="M12 20v2" /> <path d="m4.93 4.93 1.41 1.41" /> <path d="m17.66 17.66 1.41 1.41" /> <path d="M2 12h2" /> <path d="M20 12h2" /> <path d="m6.34 17.66-1.41 1.41" /> <path d="m19.07 4.93-1.41 1.41" /></symbol>
+    <symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /> <path d="m6 6 12 12" /></symbol>
+</svg>
+
+    <a href="#main" class="skip">Skip to content</a>
+
+    <!-- Sign in -->
+    <div id="loginModal" class="min-h-screen px-4 py-16 sm:py-24">
+        <div class="mx-auto w-full max-w-sm">
+            <div class="flex items-center gap-2 text-muted">
+                <svg class="icon" aria-hidden="true"><use href="#i-house"/></svg>
+                <span class="font-display text-xl text-ink">NestNet</span>
+            </div>
+            <h1 class="font-display mt-10 text-5xl leading-none tracking-tight">Sign in</h1>
+            <p class="mt-3 text-muted">The panel of your router's firewall. Your session stays on this device.</p>
+            <form id="loginForm" class="mt-8 space-y-5">
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
-                    <input type="text" id="username" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent" required>
+                    <label for="username" class="mb-1.5 block text-sm font-semibold">Username</label>
+                    <input type="text" id="username" class="field" autocomplete="username" autocapitalize="none" required>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                    <input type="password" id="password" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent" required>
+                    <label for="password" class="mb-1.5 block text-sm font-semibold">Password</label>
+                    <input type="password" id="password" class="field" autocomplete="current-password" required>
                 </div>
-                <div id="loginError" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm"></div>
-                <button type="submit" class="w-full bg-primary text-white py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors">
-                    Login
-                </button>
+                <p id="loginError" role="alert" class="hidden border-l-4 border-danger bg-surface py-2 pl-3 pr-2 text-sm"></p>
+                <button type="submit" class="btn btn-primary w-full"><span class="js-label">Sign in</span></button>
             </form>
         </div>
     </div>
 
-    <!-- Main App (hidden until logged in) -->
+    <!-- The panel (hidden until signed in) -->
     <div id="mainApp" class="hidden">
-        <!-- Header -->
-        <header class="bg-white shadow-sm">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                <div class="flex justify-between items-center gap-3">
-                    <h1 class="text-xl sm:text-2xl font-bold text-gray-900 truncate min-w-0">🏠 NestNetController</h1>
-                    <div class="flex items-center gap-2 sm:gap-4 shrink-0">
-                        <span id="dryRunBadge" class="hidden px-2 sm:px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap">
-                            🧪 DRY-RUN<span class="hidden sm:inline"> MODE</span>
-                        </span>
-                        <span id="username Display" class="text-sm text-gray-600"></span>
-                        <button onclick="logout()" class="text-sm text-red-600 hover:text-red-700 whitespace-nowrap py-2 -my-2">Logout</button>
-                    </div>
+        <header class="border-b border-line">
+            <div class="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+                <div class="flex items-center gap-2">
+                    <svg class="icon" aria-hidden="true"><use href="#i-house"/></svg>
+                    <span class="font-display text-xl">NestNet</span>
                 </div>
+                <div class="flex items-center gap-1">
+                    <button type="button" id="themeToggle" class="btn btn-quiet" aria-label="Switch theme">
+                        <svg class="icon theme-to-dark" aria-hidden="true"><use href="#i-moon"/></svg>
+                        <svg class="icon theme-to-light hidden" aria-hidden="true"><use href="#i-sun"/></svg>
+                    </button>
+                    <button type="button" onclick="logout()" class="btn btn-quiet">
+                        <svg class="icon" aria-hidden="true"><use href="#i-log-out"/></svg>
+                        <span>Sign out</span>
+                    </button>
+                </div>
+            </div>
+            <!-- Dry run is a state of the whole panel, so it is a notice under the header -->
+            <div id="dryRunBadge" class="hidden border-t border-line bg-surface">
+                <p class="mx-auto flex max-w-6xl items-center gap-2 px-4 py-2 text-sm sm:px-6">
+                    <svg class="icon icon-sm text-warning" aria-hidden="true"><use href="#i-flask-conical"/></svg>
+                    <span><strong class="font-semibold">Dry run.</strong> Rules are logged, not applied.</span>
+                </p>
             </div>
         </header>
 
-        <!-- Main Content -->
-        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <!-- Quick Actions -->
-            <div class="mb-8">
-                <h2 class="text-xl font-semibold text-gray-800 mb-4">Quick Actions</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <button onclick="quickAction('only_essential_security', this)" class="active:scale-95 disabled:opacity-60 bg-orange-500 hover:bg-orange-600 text-white py-3 px-4 rounded-lg transition">
-                        🚨 Only Essential + Security
-                    </button>
-                    <button onclick="quickAction('only_essential', this)" class="active:scale-95 disabled:opacity-60 bg-yellow-500 hover:bg-yellow-600 text-white py-3 px-4 rounded-lg transition">
-                        ⚡ Only Essential
-                    </button>
-                    <button onclick="quickAction('enable_all', this)" class="active:scale-95 disabled:opacity-60 bg-green-500 hover:bg-green-600 text-white py-3 px-4 rounded-lg transition">
-                        ✅ Enable All
-                    </button>
-                    <button onclick="reloadConfig(this)" class="active:scale-95 disabled:opacity-60 bg-blue-500 hover:bg-blue-600 text-white py-3 px-4 rounded-lg transition">
-                        🔄 Reload Config
-                    </button>
+        <main id="main" class="mx-auto max-w-6xl px-4 pb-24 pt-10 sm:px-6 lg:grid lg:grid-cols-12 lg:gap-16 lg:pt-16">
+            <!-- The statement and the scenes -->
+            <section class="self-start lg:sticky lg:top-8 lg:col-span-5" aria-labelledby="headline">
+                <div id="statement" aria-live="polite">
+                    <div class="skeleton h-14 w-4/5"></div>
+                    <div class="skeleton mt-5 h-5 w-full"></div>
+                    <div class="skeleton mt-2 h-5 w-2/3"></div>
                 </div>
-            </div>
 
-            <!-- Device Groups -->
-            <div class="mb-8">
-                <h2 class="text-xl font-semibold text-gray-800 mb-4">Device Groups</h2>
-                <div id="groupsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- Groups will be loaded here -->
+                <div class="mt-12">
+                    <h2 class="font-display text-2xl">Scenes</h2>
+                    <p class="mt-1 text-sm text-muted">One tap changes several groups at once.</p>
+                    <div id="scenes" class="rows rule mt-4"></div>
                 </div>
-            </div>
+            </section>
 
-            <!-- Activity Log -->
-            <div>
-                <h2 class="text-xl font-semibold text-gray-800 mb-4">Activity Log</h2>
-                <div class="bg-white rounded-lg shadow overflow-hidden">
-                    <div id="logsContainer" class="divide-y divide-gray-200 max-h-96 overflow-y-auto">
-                        <!-- Logs will be loaded here -->
+            <!-- Breakers and activity -->
+            <div class="mt-14 lg:col-span-7 lg:mt-0">
+                <section aria-labelledby="breakers-title">
+                    <div class="flex items-end justify-between gap-4">
+                        <div>
+                            <h2 id="breakers-title" class="font-display text-2xl">Breakers</h2>
+                            <p class="mt-1 text-sm text-muted">A group with its lever off has no internet.</p>
+                        </div>
+                        <button type="button" onclick="reloadConfig(this)" class="btn btn-quiet shrink-0">
+                            <svg class="icon icon-sm" aria-hidden="true"><use href="#i-refresh-cw"/></svg>
+                            <span class="js-label">Reload devices</span>
+                        </button>
                     </div>
-                </div>
+                    <div id="groupsContainer" class="rows rule mt-4"></div>
+
+                    <h3 id="locked-title" class="font-display mt-10 hidden text-2xl">Always on</h3>
+                    <p id="locked-note" class="mt-1 hidden text-sm text-muted">Network equipment and your own computers. No lever, so they cannot be cut by mistake.</p>
+                    <div id="lockedContainer" class="rows rule mt-4 hidden"></div>
+                </section>
+
+                <section class="mt-16" aria-labelledby="activity-title">
+                    <h2 id="activity-title" class="font-display text-2xl">Activity</h2>
+                    <div id="logsContainer" class="rows rule mt-4 max-h-[28rem] overflow-y-auto"></div>
+                </section>
             </div>
         </main>
     </div>
 
-    <!-- Toasts: bottom-center on mobile (where the thumb is), bottom-right on desktop -->
+    <!-- Toasts: bottom-center on a phone (where the thumb is), bottom-right on a desktop -->
     <div id="toastContainer" aria-live="polite"
-         class="fixed z-50 inset-x-0 bottom-0 flex flex-col items-center gap-2 p-4 pointer-events-none sm:inset-x-auto sm:right-0 sm:items-end"
+         class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex flex-col items-center gap-2 p-4 sm:inset-x-auto sm:right-0 sm:items-end"
          style="padding-bottom: max(1rem, env(safe-area-inset-bottom));">
     </div>
 
+    <script src="/static/js/summary.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

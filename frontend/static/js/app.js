@@ -3,6 +3,9 @@ const API_BASE_URL = window.location.hostname === 'localhost'
     ? 'http://localhost:8003' 
     : `http://${window.location.hostname}:8003`;
 
+// Wording and numbers live in summary.js (pure, tested in node)
+const { displayName, summarize, headline, relativeTime, activitySentence, escapeHtml, SCENES, sceneLabel, plural } = window.NN;
+
 let authToken = localStorage.getItem('authToken');
 
 // DOM Elements
@@ -12,8 +15,26 @@ const loginForm = document.getElementById('loginForm');
 const loginError = document.getElementById('loginError');
 const dryRunBadge = document.getElementById('dryRunBadge');
 
+const icon = (name, extra = '') => `<svg class="icon ${extra}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+// Theme: the head script applied the saved or system theme; the button only flips and saves it
+function syncThemeButton() {
+    const dark = document.documentElement.classList.contains('dark');
+    document.querySelector('.theme-to-dark').classList.toggle('hidden', dark);
+    document.querySelector('.theme-to-light').classList.toggle('hidden', !dark);
+    document.getElementById('themeToggle').setAttribute('aria-label', dark ? 'Switch to the light theme' : 'Switch to the dark theme');
+}
+document.getElementById('themeToggle').addEventListener('click', () => {
+    const dark = document.documentElement.classList.toggle('dark');
+    try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) { /* private mode: the choice just is not remembered */ }
+    syncThemeButton();
+});
+syncThemeButton();
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    renderScenes();
+    renderSkeletons();
     if (authToken) {
         checkAuth();
     }
@@ -26,6 +47,10 @@ loginForm.addEventListener('submit', async (e) => {
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     
+    await withBusy(loginForm.querySelector('button[type="submit"]'), 'Signing in…', () => signIn(username, password));
+});
+
+async function signIn(username, password) {
     try {
         const response = await fetch(`${API_BASE_URL}/auth/login`, {
             method: 'POST',
@@ -43,12 +68,12 @@ loginForm.addEventListener('submit', async (e) => {
             await updateDryRunBadge();
             showMainApp();
         } else {
-            showLoginError('Invalid username or password');
+            showLoginError('Wrong username or password. Check them and try again.');
         }
     } catch (error) {
-        showLoginError('Connection error. Is the backend running?');
+        showLoginError("Can't reach the router. Check that you are on the home network or on WireGuard.");
     }
-});
+}
 
 function showLoginError(message) {
     loginError.textContent = message;
@@ -128,33 +153,20 @@ async function apiRequest(endpoint, options = {}) {
 // Feedback: toasts, busy buttons, haptics
 // The panel is used mostly from a phone, so every action has to say
 // clearly that it was received, that it is running, and how it ended.
-const TOAST_STYLES = {
-    success: { classes: 'bg-green-600', icon: '✓' },
-    error:   { classes: 'bg-red-600',   icon: '✗' },
-    warning: { classes: 'bg-yellow-500', icon: '⚠' },
-    info:    { classes: 'bg-gray-800',  icon: 'ℹ' },
-};
+const TOAST_ICONS = { success: 'check', error: 'x', warning: 'triangle-alert', info: 'info' };
 
 function showToast(message, type = 'info', duration = 3500) {
     const container = document.getElementById('toastContainer');
-    const style = TOAST_STYLES[type] || TOAST_STYLES.info;
 
     const toast = document.createElement('div');
-    toast.className = `${style.classes} text-white pointer-events-auto w-full max-w-sm rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 text-sm transition duration-300 opacity-0 translate-y-2`;
+    toast.className = `toast toast-${type} pointer-events-auto flex w-full max-w-sm items-center gap-3 px-4 py-3 text-sm opacity-0 translate-y-2`;
     toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
-
-    const icon = document.createElement('span');
-    icon.className = 'font-bold text-base';
-    icon.textContent = style.icon;
-    const text = document.createElement('span');
-    text.className = 'flex-1';
-    text.textContent = message;
-    toast.append(icon, text);
+    toast.innerHTML = `<span class="toast-icon">${icon(TOAST_ICONS[type] || 'info')}</span><span class="flex-1">${escapeHtml(message)}</span>`;
 
     // Tap to dismiss early
     const dismiss = () => {
         toast.classList.add('opacity-0', 'translate-y-2');
-        setTimeout(() => toast.remove(), 300);
+        setTimeout(() => toast.remove(), 250);
     };
     toast.addEventListener('click', dismiss);
 
@@ -172,29 +184,31 @@ function vibrate(pattern) {
     if (navigator.vibrate) navigator.vibrate(pattern);
 }
 
-// Disables the button and shows a spinner while fn runs, so a slow
-// iptables call doesn't look like a missed tap (and can't be double-fired)
+// Disables the control while fn runs, so a slow iptables call doesn't look like a
+// missed tap (and can't be double-fired). A lever pulses; a button swaps its label
+// (.js-label) and shows a spinner.
 async function withBusy(button, busyLabel, fn) {
     if (!button) return fn();
     if (button.disabled) return;
 
-    const original = button.innerHTML;
+    const label = button.querySelector('.js-label');
+    const original = label ? label.textContent : null;
     button.disabled = true;
-    button.innerHTML = `
-        <span class="inline-flex items-center justify-center gap-2">
-            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle>
-                <path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path>
-            </svg>
-            ${busyLabel}
-        </span>`;
+    button.setAttribute('aria-busy', 'true');
+    button.classList.add('is-busy');
+    if (label) {
+        label.textContent = busyLabel;
+        button.classList.add('btn-busy');
+    }
     try {
         return await fn();
     } finally {
-        // The button may have been replaced by a re-render; restoring a
+        // The control may have been replaced by a re-render; restoring a
         // detached node is harmless
         button.disabled = false;
-        button.innerHTML = original;
+        button.removeAttribute('aria-busy');
+        button.classList.remove('is-busy', 'btn-busy');
+        if (label) label.textContent = original;
     }
 }
 
@@ -207,16 +221,6 @@ async function errorDetail(response, fallback) {
     }
 }
 
-function formatGroupName(name) {
-    return name.charAt(0).toUpperCase() + name.slice(1);
-}
-
-const QUICK_ACTION_LABELS = {
-    only_essential_security: 'Only Essential + Security',
-    only_essential: 'Only Essential',
-    enable_all: 'All groups enabled',
-};
-
 // Dashboard
 async function loadDashboard() {
     await Promise.all([
@@ -225,82 +229,119 @@ async function loadDashboard() {
     ]);
 }
 
+// Loading, empty and error states
+function renderSkeletons() {
+    const rows = (n, h) => Array.from({ length: n }, () => `<div class="py-5"><div class="skeleton ${h}"></div></div>`).join('');
+    document.getElementById('groupsContainer').innerHTML = rows(3, 'h-16');
+    document.getElementById('logsContainer').innerHTML = rows(3, 'h-8');
+}
+
+function renderError(container, what) {
+    container.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-3 py-5">
+            <p class="flex items-center gap-2 text-sm">${icon('triangle-alert', 'icon-sm text-danger')}<span>${escapeHtml(what)}</span></p>
+            <button type="button" class="btn" onclick="loadDashboard()"><span class="js-label">Try again</span></button>
+        </div>`;
+}
+
+// Scenes: presets that change several groups at once
+function renderScenes() {
+    document.getElementById('scenes').innerHTML = SCENES.map(scene => `
+        <button type="button" onclick="quickAction('${scene.action}', this)"
+                class="flex min-h-[44px] w-full flex-col items-start py-4 text-left hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] disabled:opacity-60">
+            <span class="js-label font-semibold">${escapeHtml(scene.label)}</span>
+            <span class="text-sm text-muted">${escapeHtml(scene.hint)}</span>
+        </button>`).join('');
+}
+
 async function loadGroups() {
     try {
         const response = await apiRequest('/devices/groups');
         if (!response.ok) throw new Error('Failed to load groups');
         
         const groups = await response.json();
+        renderStatement(groups);
         renderGroups(groups);
     } catch (error) {
         console.error('Error loading groups:', error);
+        renderError(document.getElementById('groupsContainer'), "Couldn't load the groups.");
     }
 }
 
-function renderGroups(groups) {
-    const container = document.getElementById('groupsContainer');
-    container.innerHTML = '';
-    
-    groups.forEach(group => {
-        if (group.auto_detect) return; // Skip auto-detect groups for now
-        
-        const card = createGroupCard(group);
-        container.appendChild(card);
-    });
+function renderStatement(groups) {
+    const { title, body } = headline(summarize(groups));
+    document.getElementById('statement').innerHTML = `
+        <h1 id="headline" class="font-display text-5xl leading-[0.95] tracking-tight sm:text-6xl">${escapeHtml(title)}</h1>
+        <p class="mt-5 max-w-md text-lg">${escapeHtml(body)}</p>`;
 }
 
-function createGroupCard(group) {
-    const div = document.createElement('div');
-    div.className = 'bg-white rounded-lg shadow p-6';
-    
-    const isProtected = group.protected;
-    const statusColor = group.enabled ? 'text-green-600' : 'text-red-600';
-    const statusIcon = group.enabled ? '✅' : '❌';
-    const statusText = group.enabled ? 'Active' : 'Blocked';
-    
-    div.innerHTML = `
-        <div class="flex justify-between items-start mb-4">
-            <div>
-                <h3 class="text-lg font-semibold text-gray-900 capitalize">${group.name}</h3>
-                <p class="text-sm text-gray-500 mt-1">${group.description || ''}</p>
+function renderGroups(groups) {
+    const real = groups.filter(group => !group.auto_detect); // auto-detect groups are not built yet
+    const switchable = real.filter(group => !group.protected);
+    const locked = real.filter(group => group.protected);
+
+    const container = document.getElementById('groupsContainer');
+    container.innerHTML = switchable.length
+        ? switchable.map(createBreakerRow).join('')
+        : `<p class="py-5 text-sm text-muted">No groups can be switched yet. Add one to devices.yaml, then reload the devices.</p>`;
+
+    const lockedContainer = document.getElementById('lockedContainer');
+    for (const id of ['locked-title', 'locked-note']) document.getElementById(id).classList.toggle('hidden', !locked.length);
+    lockedContainer.classList.toggle('hidden', !locked.length);
+    lockedContainer.innerHTML = locked.map(createLockedRow).join('');
+}
+
+function deviceList(group) {
+    if (!group.devices.length) return `<p class="mt-2 text-sm text-muted">No devices yet.</p>`;
+    return `
+        <details class="mt-2">
+            <summary class="inline-flex min-h-[44px] items-center gap-1 text-sm text-muted hover:text-ink sm:min-h-0">
+                ${plural(group.devices.length, 'device', 'devices')}
+                ${icon('chevron-down', 'icon-sm chev')}
+            </summary>
+            <ul class="mt-1 space-y-0.5 text-sm">
+                ${group.devices.map(device => `<li>${escapeHtml(displayName(device.name))}</li>`).join('')}
+            </ul>
+        </details>`;
+}
+
+// One breaker: the plate, what is behind it, and the lever.
+// The lever is drawn from the server's answer, never optimistically.
+function createBreakerRow(group) {
+    const name = displayName(group.name);
+    return `
+        <div class="flex items-start justify-between gap-4 py-5">
+            <div class="min-w-0">
+                <h3 class="font-display text-2xl leading-tight">${escapeHtml(name)}</h3>
+                ${group.description ? `<p class="text-sm text-muted">${escapeHtml(group.description)}</p>` : ''}
+                ${deviceList(group)}
             </div>
-            <span class="${statusColor} text-2xl">${statusIcon}</span>
-        </div>
-        
-        <div class="mb-4">
-            <div class="text-sm text-gray-600">
-                ${group.devices.length} device${group.devices.length !== 1 ? 's' : ''}
+            <div class="flex shrink-0 flex-col items-end gap-1">
+                <span class="lever-hit">
+                    <button type="button" role="switch" aria-checked="${group.enabled}" aria-label="Internet for ${escapeHtml(name)}"
+                            class="lever" onclick="toggleGroup('${escapeHtml(group.name)}', this)">
+                        <span class="lever-slug"></span>
+                    </button>
+                </span>
+                <span class="${group.enabled ? 'state-on' : 'state-off'} text-sm">${group.enabled ? 'Internet on' : 'Internet off'}</span>
             </div>
-            <div class="mt-2 space-y-1">
-                ${group.devices.slice(0, 3).map(device => `
-                    <div class="text-xs text-gray-500">
-                        • ${device.name}
-                    </div>
-                `).join('')}
-                ${group.devices.length > 3 ? `<div class="text-xs text-gray-400">+ ${group.devices.length - 3} more</div>` : ''}
+        </div>`;
+}
+
+function createLockedRow(group) {
+    return `
+        <div class="flex items-start justify-between gap-4 py-5">
+            <div class="min-w-0">
+                <h3 class="font-display text-2xl leading-tight">${escapeHtml(displayName(group.name))}</h3>
+                ${group.description ? `<p class="text-sm text-muted">${escapeHtml(group.description)}</p>` : ''}
+                ${deviceList(group)}
             </div>
-        </div>
-        
-        <div class="flex items-center justify-between">
-            <span class="text-sm font-medium ${statusColor}">${statusText}</span>
-            ${!isProtected ? `
-                <button 
-                    onclick="toggleGroup('${group.name}', this)" 
-                    class="${group.enabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white px-4 py-2 rounded-lg text-sm transition active:scale-95 disabled:opacity-60"
-                >
-                    ${group.enabled ? 'Block' : 'Enable'}
-                </button>
-            ` : `
-                <span class="text-xs text-gray-400 px-4 py-2">🔒 Protected</span>
-            `}
-        </div>
-    `;
-    
-    return div;
+            <span class="flex shrink-0 items-center gap-1.5 pt-1 text-sm text-muted">${icon('lock', 'icon-sm')}Always on</span>
+        </div>`;
 }
 
 async function toggleGroup(groupName, button) {
-    const label = formatGroupName(groupName);
+    const label = displayName(groupName);
     await withBusy(button, 'Applying…', async () => {
         try {
             const response = await apiRequest(`/devices/groups/${groupName}/toggle`, {
@@ -313,12 +354,12 @@ async function toggleGroup(groupName, button) {
             }
             
             const data = await response.json();
-            const verb = data.action === 'block' ? 'blocked' : 'enabled';
+            const verb = data.action === 'block' ? 'turned off' : 'turned on';
             // 200 with success=false means some firewall rules failed to apply
             if (data.success) {
                 showToast(`${label} ${verb}`, 'success');
             } else {
-                showToast(`${label} ${verb} only partially — some devices failed, check the activity log`, 'warning');
+                showToast(`${label} ${verb} only partly. Some devices failed; check the activity.`, 'warning');
             }
             await loadDashboard();
         } catch (error) {
@@ -329,7 +370,7 @@ async function toggleGroup(groupName, button) {
 }
 
 async function quickAction(action, button) {
-    const label = QUICK_ACTION_LABELS[action] || formatAction(action);
+    const label = sceneLabel(action);
     await withBusy(button, 'Applying…', async () => {
         try {
             const response = await apiRequest('/devices/quick-action', {
@@ -344,9 +385,9 @@ async function quickAction(action, button) {
             
             const data = await response.json();
             if (data.success) {
-                showToast(`${label} applied`, 'success');
+                showToast(`Scene applied: ${label}`, 'success');
             } else {
-                showToast(`${label} applied only partially — check the activity log`, 'warning');
+                showToast(`Scene applied only partly: ${label}. Check the activity.`, 'warning');
             }
             await loadDashboard();
         } catch (error) {
@@ -369,10 +410,10 @@ async function reloadConfig(button) {
             }
             
             await loadDashboard();
-            showToast('Configuration reloaded', 'success');
+            showToast('Devices reloaded', 'success');
         } catch (error) {
             console.error('Error reloading config:', error);
-            showToast(`Couldn't reload configuration: ${error.message}`, 'error');
+            showToast(`Couldn't reload the devices: ${error.message}`, 'error');
         }
     });
 }
@@ -386,48 +427,33 @@ async function loadLogs() {
         renderLogs(logs);
     } catch (error) {
         console.error('Error loading logs:', error);
+        renderError(document.getElementById('logsContainer'), "Couldn't load the activity.");
     }
 }
 
+// Activity is a timeline, so the time is the left edge of every row
 function renderLogs(logs) {
     const container = document.getElementById('logsContainer');
     
     if (logs.length === 0) {
-        container.innerHTML = '<div class="p-4 text-gray-500 text-center">No activity yet</div>';
+        container.innerHTML = '<p class="py-5 text-sm text-muted">Nothing yet. Switching a group on or off will show up here.</p>';
         return;
     }
     
     container.innerHTML = logs.map(log => {
-        const timestamp = new Date(log.timestamp).toLocaleString();
-        const statusColor = log.success ? 'text-green-600' : 'text-red-600';
-        const statusIcon = log.success ? '✓' : '✗';
-        
+        const when = window.NN.parseTimestamp(log.timestamp);
         return `
-            <div class="p-4 hover:bg-gray-50 transition-colors">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-3">
-                        <span class="${statusColor} font-bold">${statusIcon}</span>
-                        <div>
-                            <div class="text-sm font-medium text-gray-900">
-                                ${formatAction(log.action)} - ${log.target}
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                by ${log.user} at ${timestamp}
-                            </div>
-                        </div>
-                    </div>
+            <div class="grid grid-cols-[5.5rem_1fr] gap-x-3 py-3 text-sm">
+                <time datetime="${when.toISOString()}" title="${escapeHtml(when.toLocaleString())}" class="nums text-muted">${escapeHtml(relativeTime(log.timestamp))}</time>
+                <div class="min-w-0">
+                    <p class="flex items-center gap-1.5">
+                        ${log.success ? '' : icon('x', 'icon-sm text-danger')}
+                        <span class="${log.success ? '' : 'font-semibold'}">${escapeHtml(activitySentence(log))}</span>
+                    </p>
+                    <p class="text-muted">${log.success ? '' : 'Not applied. '}By ${escapeHtml(log.user)}${log.details ? `. ${escapeHtml(log.details)}` : ''}</p>
                 </div>
-                ${log.details ? `<div class="ml-8 mt-1 text-xs text-gray-500">${log.details}</div>` : ''}
-            </div>
-        `;
+            </div>`;
     }).join('');
-}
-
-function formatAction(action) {
-    return action
-        .split('_')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
 }
 
 // Auto-refresh every 30 seconds

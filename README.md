@@ -12,9 +12,10 @@
 
 ## ✨ Features
 
+- 🎛️ **Breaker-panel UI** - A lever per group, light and dark themes, works with no internet (see [DESIGN.md](DESIGN.md))
 - 🎯 **Device Grouping** - Organize devices by MAC address into logical groups (Essential, Security, Media, Kids)
 - 🔒 **Easy Control** - Simple web UI to enable/disable internet access per group
-- ⚡ **Quick Actions** - One-click presets like "Only Essential + Security" for bedtime or focused work
+- ⚡ **Scenes** - One-click presets like "Essential and cameras" for bedtime or focused work
 - 🧪 **Safe Testing** - Dry-run mode to test without affecting your network
 - 📊 **Activity Logs** - Track who blocked/unblocked what and when
 - 🐳 **Docker Ready** - Simple deployment with docker-compose
@@ -234,7 +235,7 @@ Open in your browser: `http://YOUR_GATEWAY_IP:3002`
 
 Default login: `admin` / `ChangeThisPassword123`
 
-> 🛡️ This URL is designed to stay reachable even if a Quick Action blocks every device group, thanks to the host-level failsafe rule below — but only once you've set it up. New installs should configure it before going to production (step below).
+> 🛡️ This URL is designed to stay reachable even if a scene turns every device group off, thanks to the host-level failsafe rule below — but only once you've set it up. New installs should configure it before going to production (step below).
 
 ---
 
@@ -285,24 +286,24 @@ This rule is intentionally set up **outside of Docker and outside this repo** (d
 ### Web Interface
 
 The dashboard shows:
-- **Quick Actions** - One-click presets for common scenarios
-- **Device Groups** - Status and control for each group
+- **Scenes** - One-click presets for common scenarios
+- **Breakers** - A lever for each group
 - **Activity Log** - History of all actions
 
-### Quick Actions
+### Scenes
 
-- **🚨 Only Essential + Security** - Switch off every group except essential and cameras (great for bedtime)
-- **⚡ Only Essential** - Block everything except essential devices (deep focus mode)
-- **✅ Enable All** - Switch on every group (and lift any block)
-- **🔄 Reload Config** - Reload device configuration from disk
+Presets that change several groups at once:
+
+- **Essential and cameras** - Turns every other group off (great for bedtime)
+- **Essential only** - Turns the cameras off too (deep focus mode)
+- **Everything on** - Turns every group on and lifts any block
+- **Reload devices** - Re-reads `devices.yaml` (a small button above the breakers)
 
 ### Managing Groups
 
-Each group card shows:
-- Group name and description
-- Number of devices
-- Current status (Active/Blocked)
-- Enable/Block button (protected groups show 🔒)
+The panel opens with a sentence built from the live state ("Media and Essential are off. 6 devices cannot reach the internet, 15 can."). Each switchable group is a row with a **lever**: on means its devices have internet, off means they have none; the words "Internet on" or "Internet off" say it too. Groups that are protected are listed under "Always on" with a lock and no lever. Tap "N devices" to see the names. The activity list below shows who changed what and when.
+
+The panel renders with no internet access: its CSS, fonts and icons are served by the panel itself (`frontend/static`), so you can still use it from a device that has just been cut off. The design rules are in [DESIGN.md](DESIGN.md).
 
 ### Dry-Run Mode
 
@@ -390,7 +391,7 @@ How it is enforced:
 
 - On every backend startup, and every time a group is switched or "Reload Config" runs, `sync_allowlist()` makes the `FORWARD` chain match that table: it adds the missing ACCEPT rules (one per allowed MAC, tagged `nestnet-allow`, plus one per allowed interface, tagged `nestnet-allow-if`), removes stale ones, sets the policy to DROP, and **last** deletes any broad `-i <LAN> -o <WAN> -j ACCEPT` rule in `FORWARD` or Docker's `DOCKER-USER` chain, whatever LAN interface it names. That order means nobody is cut by the sync itself.
 - Replies from the internet are accepted by an `ESTABLISHED,RELATED` rule on the WAN interface; the sync adds it if it is missing.
-- Group blocking (Quick Actions, toggles on `always_on` groups) adds DROP rules at the top that win over the allowlist.
+- Group blocking (scenes, levers of `always_on` groups) adds DROP rules at the top that win over the allowlist.
 - An unreadable `group_state.json` fails closed: no optional group is on.
 
 **Practical implication:** a new device has no internet until its MAC is in a group that is on. After editing `devices.yaml`:

@@ -1,0 +1,164 @@
+/*
+ * NestNetController panel: tokens and the few components that Tailwind utilities
+ * cannot say clearly (the lever, ruled rows, skeletons). Rules: ../../../DESIGN.md.
+ * Everything is served by the panel itself: it has to render on a device with no internet.
+ */
+
+/* Fonts: Barlow for text, Barlow Condensed for plates and figures. Two weights each. */
+@font-face { font-family: "Barlow"; font-weight: 400; font-style: normal; font-display: swap; src: url("/static/fonts/barlow-400.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-weight: 600; font-style: normal; font-display: swap; src: url("/static/fonts/barlow-600.woff2") format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 500; font-style: normal; font-display: swap; src: url("/static/fonts/barlow-condensed-500.woff2") format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 600; font-style: normal; font-display: swap; src: url("/static/fonts/barlow-condensed-600.woff2") format("woff2"); }
+
+/* Light: a painted enamel panel. Never pure white or pure black. */
+:root {
+    --bg: #E3E8E2;
+    --surface: #EDF0EA;
+    --ink: #15201B;
+    --muted: #4A5852;
+    --border: #BAC4BC;          /* dividers only (about 1.5:1); controls use --muted */
+    --lamp: #8F4A06;            /* amber as text: internet is on */
+    --lamp-fill: #E9A53F;       /* amber as a fill (the lit lever track) */
+    --on-lamp: #15201B;
+    --danger: #B42318;
+    --warning: #8F4A06;
+    --ok: #1F6F50;
+    color-scheme: light;
+}
+/* Dark: the same panel at night. */
+.dark {
+    --bg: #11171A;
+    --surface: #182025;
+    --ink: #E6EAE4;
+    --muted: #9AA7A1;
+    --border: #2B383E;
+    --lamp: #F0AE4B;
+    --lamp-fill: #F0AE4B;
+    --on-lamp: #17130E;
+    --danger: #F97066;
+    --warning: #E8A842;
+    --ok: #5FCB9A;
+    color-scheme: dark;
+}
+
+html { background: var(--bg); }
+body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Barlow", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+}
+.font-display { font-family: "Barlow Condensed", "Barlow", ui-sans-serif, sans-serif; font-weight: 600; }
+.nums { font-variant-numeric: tabular-nums; }
+
+/* Focus: one visible ring everywhere */
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+.skip { position: absolute; left: -9999px; top: 8px; z-index: 60; background: var(--ink); color: var(--bg); padding: 8px 12px; border-radius: 6px; }
+.skip:focus { left: 8px; }
+
+/* Icons: Lucide, stroke 1.5 */
+.icon { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.icon-sm { width: 1rem; height: 1rem; }
+
+/* Ruled lists: structure by hairlines, not boxes */
+.rule { border-top: 1px solid var(--border); }
+.rule-double { border-top: 4px double var(--border); }
+.rows > * + * { border-top: 1px solid var(--border); }
+
+/* Buttons */
+.btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    min-height: 44px; padding: 0 1rem; border-radius: 6px;
+    font-weight: 600; font-size: 0.9375rem; line-height: 1;
+    border: 1px solid var(--muted); color: var(--ink); background: transparent;
+    transition: background-color 150ms ease-out, border-color 150ms ease-out;
+}
+.btn:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.btn:active { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn-primary:hover { background: color-mix(in srgb, var(--ink) 88%, var(--bg)); }
+.btn-quiet { border-color: transparent; color: var(--muted); padding: 0 0.5rem; }
+.btn-quiet:hover { color: var(--ink); }
+.btn-busy::after {
+    content: ""; width: 0.875rem; height: 0.875rem; border-radius: 50%;
+    border: 2px solid currentColor; border-right-color: transparent;
+    animation: spin 700ms linear infinite;
+}
+
+/* Inputs */
+.field { display: block; width: 100%; min-height: 44px; padding: 0 0.75rem; border-radius: 6px; border: 1px solid var(--muted); background: var(--surface); color: var(--ink); font: inherit; }
+.field:focus-visible { outline-offset: 0; }
+
+/*
+ * The lever: a recessed track and a sliding slug.
+ * Off: slug left, empty track. On: slug right, track lit. State is also shown by the engraved
+ * I / O and the words next to it, never by colour alone.
+ */
+.lever {
+    position: relative; flex: none;
+    width: 72px; height: 40px; border-radius: 999px;
+    border: 1.5px solid var(--muted);
+    background: color-mix(in srgb, var(--ink) 9%, var(--surface));
+    box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 25%, transparent);
+    transition: background-color 200ms ease-out, border-color 200ms ease-out;
+    cursor: pointer;
+}
+.lever::before, .lever::after {   /* the engraved marks: O on the right when off, I on the left when on */
+    position: absolute; top: 50%; transform: translateY(-50%);
+    font: 600 14px/1 "Barlow Condensed", sans-serif; letter-spacing: 0.04em; color: var(--muted);
+}
+.lever::before { content: "I"; left: 14px; opacity: 0; }
+.lever::after { content: "O"; right: 13px; opacity: 1; }
+.lever-slug {
+    position: absolute; top: 3px; left: 3px; width: 31px; height: 31px; border-radius: 50%;
+    background: var(--ink);
+    transition: transform 200ms ease-out;
+}
+.lever[aria-checked="true"] { background: var(--lamp-fill); border-color: var(--ink); }
+.lever[aria-checked="true"] .lever-slug { transform: translateX(32px); }
+.lever[aria-checked="true"]::before { opacity: 1; color: var(--on-lamp); }
+.lever[aria-checked="true"]::after { opacity: 0; }
+.lever:disabled { cursor: progress; }
+.lever.is-busy .lever-slug { animation: pulse 900ms ease-in-out infinite; }
+.lever-hit { min-width: 44px; min-height: 44px; display: flex; align-items: center; }
+
+/* State words next to a lever */
+.state-on { color: var(--lamp); font-weight: 600; }
+.state-off { color: var(--muted); font-weight: 600; }
+
+/* Skeleton rows while loading */
+.skeleton { background: color-mix(in srgb, var(--ink) 9%, transparent); border-radius: 6px; animation: pulse 1400ms ease-in-out infinite; }
+
+/* Toasts: the only shadow in the panel (it is an overlay) */
+.toast {
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--muted); border-left-width: 4px; border-radius: 6px;
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--ink) 22%, transparent);
+    transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+.toast-success { border-left-color: var(--ok); }
+.toast-error { border-left-color: var(--danger); }
+.toast-warning { border-left-color: var(--warning); }
+.toast-info { border-left-color: var(--muted); }
+.toast-success .toast-icon { color: var(--ok); }
+.toast-error .toast-icon { color: var(--danger); }
+.toast-warning .toast-icon { color: var(--warning); }
+
+/* The names of a group's devices open in place */
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+details[open] .chev { transform: rotate(180deg); }
+.chev { transition: transform 200ms ease-out; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { opacity: 0.45; } }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* A busy row-button (scenes) dims; levers have their own pulse */
+.is-busy:not(.lever) { opacity: 0.6; }
